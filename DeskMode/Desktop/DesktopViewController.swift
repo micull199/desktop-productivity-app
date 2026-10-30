@@ -1,8 +1,9 @@
 import UIKit
 import Combine
 
-/// Root of the external display. Owns wallpaper, menu bar, windows, dock, launcher, popups and
-/// the cursor, and routes every pointer / key event to the right target.
+/// Root of the external display. Owns wallpaper, menu bar, windows, dock, launcher, popups,
+/// dialogs, toasts, tooltips and the cursor, and routes every pointer / key event to the right
+/// target.
 final class DesktopViewController: UIViewController, InputSink {
 
     var onWindowCountChange: ((Int) -> Void)?
@@ -13,20 +14,22 @@ final class DesktopViewController: UIViewController, InputSink {
     }
 
     private let wallpaper = CAGradientLayer()
+    private let wallpaperGlows = [CAGradientLayer(), CAGradientLayer()]
     private let windowContainer = UIView()
     private let menuBar = MenuBarView()
     private let dock = DockView()
-    private let overlay = PassThroughView() // popups, launcher, toasts
-    private let snapPreview = UIView()
+    private let overlay = PassThroughView() // popups, launcher, dialogs, toasts, tooltips
+    private let snapPreview = Theme.materialView(.panel, cornerRadius: Theme.Radius.window)
     private let touchCapture = TouchCaptureView()
     private let cursorView = CursorView()
     private lazy var windowManager = WindowManager(container: windowContainer)
+    private lazy var tooltips = TooltipPresenter(container: overlay)
 
     private var hovered: (PointerTarget, UIView)?
     private var captured: (PointerTarget, UIView)?
     private var popup: PopupMenuView?
     private var launcher: LauncherView?
-    private var aboutPanel: UIView?
+    private var dialog: DialogPanelView?
     private var toastViews: [ToastView] = []
 
     private let input = InputRouter.shared
@@ -40,7 +43,12 @@ final class DesktopViewController: UIViewController, InputSink {
         view.layer.addSublayer(wallpaper)
         wallpaper.startPoint = CGPoint(x: 0, y: 0)
         wallpaper.endPoint = CGPoint(x: 1, y: 1)
-        applyWallpaper()
+        for glow in wallpaperGlows {
+            glow.type = .radial
+            glow.locations = [0, 1]
+            view.layer.addSublayer(glow)
+        }
+        applyWallpaper(animated: false)
 
         view.addSubview(windowContainer)
         view.addSubview(snapPreview)
@@ -54,10 +62,10 @@ final class DesktopViewController: UIViewController, InputSink {
         touchCapture.onMoved = { [weak self] p in self?.input.moveCursor(to: p) }
         touchCapture.onEnded = { [weak self] p in self?.input.moveCursor(to: p); self?.input.button(.left, pressed: false) }
 
-        snapPreview.backgroundColor = UIColor(white: 1, alpha: 0.12)
-        snapPreview.layer.cornerRadius = Theme.windowCornerRadius
-        snapPreview.layer.borderWidth = 1
-        snapPreview.layer.borderColor = UIColor(white: 1, alpha: 0.35).cgColor
+        snapPreview.layer.borderWidth = Theme.Size.hairline
+        snapPreview.layer.borderColor = Theme.borderStrong.cgColor
+        snapPreview.contentView.backgroundColor = Theme.snapPreviewFill
+        snapPreview.alpha = 0
         snapPreview.isHidden = true
         snapPreview.isUserInteractionEnabled = false
 
@@ -67,7 +75,7 @@ final class DesktopViewController: UIViewController, InputSink {
         menuBar.presentMenu = { [weak self] menu, anchor in
             guard let self else { return }
             let rect = self.menuBar.convert(anchor, to: self.view)
-            self.present(menu, at: CGPoint(x: rect.minX, y: rect.maxY + 2))
+            self.present(menu, at: CGPoint(x: rect.minX, y: self.menuBar.frame.maxY))
         }
 
         dock.onOpenApp = { [weak self] app in self?.open(app) }
@@ -78,7 +86,7 @@ final class DesktopViewController: UIViewController, InputSink {
         dock.presentMenu = { [weak self] menu, anchor in
             guard let self else { return }
             let rect = self.dock.convert(anchor, to: self.view)
-            self.present(menu, at: CGPoint(x: rect.midX - menu.bounds.width / 2, y: rect.minY - menu.bounds.height - 10))
+            self.present(menu, at: CGPoint(x: rect.midX - menu.bounds.width / 2, y: rect.minY - menu.bounds.height - Theme.Space.s))
         }
 
         windowManager.onChange = { [weak self] in self?.windowsDidChange() }
@@ -130,17 +138,16 @@ final class DesktopViewController: UIViewController, InputSink {
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
         let b = view.bounds
-        CATransaction.begin()
-        CATransaction.setDisableActions(true)
-        wallpaper.frame = b
-        CATransaction.commit()
+        layoutWallpaper(in: b)
         windowContainer.frame = b
         overlay.frame = b
         touchCapture.frame = b
         menuBar.frame = CGRect(x: 0, y: 0, width: b.width, height: Theme.menuBarHeight)
         let dockSize = dock.intrinsicContentSize
-        dock.frame = CGRect(x: (b.width - dockSize.width) / 2, y: b.height - dockSize.height - 8, width: dockSize.width, height: dockSize.height)
-        windowManager.workArea = CGRect(x: 0, y: Theme.menuBarHeight, width: b.width, height: b.height - Theme.menuBarHeight - Theme.dockHeight - 10)
+        dock.frame = CGRect(x: ((b.width - dockSize.width) / 2).rounded(), y: b.height - dockSize.height - Theme.Size.dockBottomMargin,
+                            width: dockSize.width, height: dockSize.height)
+        windowManager.workArea = CGRect(x: 0, y: Theme.menuBarHeight, width: b.width,
+                                        height: b.height - Theme.menuBarHeight - Theme.dockHeight - Theme.Size.dockBottomMargin)
         windowManager.relayout()
         input.desktopBounds = b
         if !openedInitialWindow, b.width > 200, b.height > 200 {
@@ -149,9 +156,8 @@ final class DesktopViewController: UIViewController, InputSink {
             if windowManager.windows.isEmpty { open(.browser) }
             cursorView.place(at: input.cursor)
         }
-        if let launcher {
-            launcher.center = CGPoint(x: b.midX, y: b.height * 0.22 + launcher.bounds.height / 2)
-        }
+        if let launcher { positionLauncher(launcher) }
+        positionToasts(animated: false)
         view.bringSubviewToFront(cursorView)
     }
 
@@ -174,12 +180,49 @@ final class DesktopViewController: UIViewController, InputSink {
 
     private func observeSettings() {
         statusObservers.append(settings.$wallpaper.sink { [weak self] _ in
-            DispatchQueue.main.async { self?.applyWallpaper() }
+            DispatchQueue.main.async { self?.applyWallpaper(animated: true) }
         })
     }
 
-    private func applyWallpaper() {
-        wallpaper.colors = Theme.wallpaperColors(settings.wallpaper)
+    // MARK: - Wallpaper
+
+    /// Base linear gradient plus two large soft radial highlights. Switching wallpapers
+    /// crossfades: standalone layers animate colour changes implicitly within the transaction.
+    private func applyWallpaper(animated: Bool) {
+        let wp = settings.wallpaper
+        CATransaction.begin()
+        if animated {
+            CATransaction.setAnimationDuration(Theme.Motion.slow)
+            CATransaction.setAnimationTimingFunction(CAMediaTimingFunction(name: .easeInEaseOut))
+        } else {
+            CATransaction.setDisableActions(true)
+        }
+        wallpaper.colors = Theme.wallpaperColors(wp)
+        let highlights = Theme.wallpaperHighlights(wp)
+        for (i, glow) in wallpaperGlows.enumerated() {
+            guard highlights.indices.contains(i) else { glow.isHidden = true; continue }
+            glow.isHidden = false
+            glow.colors = [highlights[i].color.cgColor, highlights[i].color.withAlphaComponent(0).cgColor]
+        }
+        CATransaction.commit()
+        layoutWallpaper(in: view.bounds)
+    }
+
+    private func layoutWallpaper(in bounds: CGRect) {
+        guard bounds.width > 0, bounds.height > 0 else { return }
+        let highlights = Theme.wallpaperHighlights(settings.wallpaper)
+        let aspect = bounds.width / bounds.height
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        wallpaper.frame = bounds
+        for (i, glow) in wallpaperGlows.enumerated() {
+            glow.frame = bounds
+            guard highlights.indices.contains(i) else { continue }
+            let h = highlights[i]
+            glow.startPoint = h.center
+            glow.endPoint = CGPoint(x: h.center.x + h.radius, y: h.center.y + h.radius * aspect)
+        }
+        CATransaction.commit()
     }
 
     // MARK: - Apps & windows
@@ -203,6 +246,8 @@ final class DesktopViewController: UIViewController, InputSink {
         }
         let window = windowManager.open(content)
         window.onSnapPreview = { [weak self] tile in self?.showSnapPreview(tile) }
+        window.minimizeTarget = { [weak self] in self?.dock.frame(for: app) }
+        dock.bounce(app)
         return window
     }
 
@@ -219,31 +264,30 @@ final class DesktopViewController: UIViewController, InputSink {
 
     private func showSnapPreview(_ tile: WindowManager.Tile?) {
         guard let tile else {
-            UIView.animate(withDuration: 0.15) { self.snapPreview.alpha = 0 } completion: { _ in self.snapPreview.isHidden = true }
+            Theme.Motion.animate(Theme.Motion.fast, animations: { self.snapPreview.alpha = 0 }) { _ in
+                if self.snapPreview.alpha == 0 { self.snapPreview.isHidden = true }
+            }
             return
         }
-        let area = windowManager.workArea.insetBy(dx: 8, dy: 8)
-        let gap: CGFloat = 8
-        let target: CGRect
-        switch tile {
-        case .left: target = CGRect(x: area.minX, y: area.minY, width: (area.width - gap) / 2, height: area.height)
-        case .right: target = CGRect(x: area.midX + gap / 2, y: area.minY, width: (area.width - gap) / 2, height: area.height)
-        default: target = area
+        let target = windowManager.frame(for: tile)
+        if snapPreview.isHidden {
+            snapPreview.isHidden = false
+            snapPreview.frame = target.insetBy(dx: target.width * 0.02, dy: target.height * 0.02)
         }
-        snapPreview.isHidden = false
-        UIView.animate(withDuration: 0.18) {
+        Theme.Motion.spring(Theme.Motion.slow) {
             self.snapPreview.alpha = 1
             self.snapPreview.frame = target
         }
     }
 
-    // MARK: - Popups, launcher, toasts
+    // MARK: - Popups
 
     private func present(_ menu: PopupMenuView, at origin: CGPoint) {
         dismissPopup()
+        tooltips.cancel()
         var o = origin
-        o.x = min(max(8, o.x), view.bounds.width - menu.bounds.width - 8)
-        o.y = min(max(Theme.menuBarHeight, o.y), view.bounds.height - menu.bounds.height - 8)
+        o.x = min(max(Theme.Space.s, o.x), view.bounds.width - menu.bounds.width - Theme.Space.s)
+        o.y = min(max(Theme.menuBarHeight, o.y), view.bounds.height - menu.bounds.height - Theme.Space.s)
         menu.frame.origin = o
         let previousDismiss = menu.onDismiss
         menu.onDismiss = { [weak self, weak menu] in
@@ -253,8 +297,8 @@ final class DesktopViewController: UIViewController, InputSink {
         overlay.addSubview(menu)
         popup = menu
         menu.alpha = 0
-        menu.transform = CGAffineTransform(translationX: 0, y: -4)
-        UIView.animate(withDuration: 0.12) {
+        menu.transform = CGAffineTransform(translationX: 0, y: -Theme.Space.xs)
+        Theme.Motion.animate(Theme.Motion.fast) {
             menu.alpha = 1
             menu.transform = .identity
         }
@@ -270,12 +314,15 @@ final class DesktopViewController: UIViewController, InputSink {
         let dismissHandler = popup.onDismiss
         popup.onDismiss = nil
         dismissHandler?()
-        UIView.animate(withDuration: 0.1) { popup.alpha = 0 } completion: { _ in popup.removeFromSuperview() }
+        Theme.Motion.animate(Theme.Motion.fast, animations: { popup.alpha = 0 }) { _ in popup.removeFromSuperview() }
     }
+
+    // MARK: - Launcher
 
     func toggleLauncher() {
         if launcher != nil { dismissLauncher(); return }
         dismissPopup()
+        tooltips.cancel()
         let l = LauncherView()
         l.onDismiss = { [weak self] in self?.dismissLauncher() }
         l.onSelect = { [weak self] result in
@@ -290,77 +337,108 @@ final class DesktopViewController: UIViewController, InputSink {
         overlay.addSubview(l)
         launcher = l
         l.activate()
-        view.setNeedsLayout()
-        view.layoutIfNeeded()
+        positionLauncher(l)
+        l.layoutIfNeeded()
         l.alpha = 0
-        l.transform = CGAffineTransform(scaleX: 0.96, y: 0.96)
-        UIView.animate(withDuration: 0.15) { l.alpha = 1; l.transform = .identity }
+        l.transform = CGAffineTransform(scaleX: Theme.Motion.appearScale, y: Theme.Motion.appearScale)
+        Theme.Motion.spring(0.3) {
+            l.alpha = 1
+            l.transform = .identity
+        }
+    }
+
+    /// Horizontally centred, top edge at 22 % of the screen; the frame grows downward with results.
+    private func positionLauncher(_ l: LauncherView) {
+        let b = view.bounds
+        l.frame.origin = CGPoint(x: ((b.width - l.bounds.width) / 2).rounded(), y: (b.height * 0.22).rounded())
     }
 
     private func dismissLauncher() {
         guard let l = launcher else { return }
         launcher = nil
-        UIView.animate(withDuration: 0.12) { l.alpha = 0 } completion: { _ in l.removeFromSuperview() }
+        Theme.Motion.animate(Theme.Motion.fast, animations: { l.alpha = 0 }) { _ in l.removeFromSuperview() }
     }
 
+    // MARK: - Toasts
+
     func showToast(_ text: String) {
-        let toast = ToastView(text: text)
-        toast.center = CGPoint(x: view.bounds.midX, y: Theme.menuBarHeight + 34 + CGFloat(toastViews.count) * (toast.bounds.height + 8))
-        toast.alpha = 0
-        overlay.addSubview(toast)
+        showToast(text, symbol: nil)
+    }
+
+    /// Notification-style card in the top-right corner; slides in from the right and fades
+    /// after `Theme.Timing.toastDuration`. Several toasts stack vertically.
+    func showToast(_ text: String, symbol: String?) {
+        let toast = ToastView(text: text, symbol: symbol)
         toastViews.append(toast)
-        UIView.animate(withDuration: 0.2) { toast.alpha = 1 }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2.2) { [weak self, weak toast] in
-            guard let toast else { return }
-            UIView.animate(withDuration: 0.25) { toast.alpha = 0 } completion: { _ in
+        overlay.addSubview(toast)
+        toast.alpha = 0
+        positionToasts(animated: false)
+        toast.transform = CGAffineTransform(translationX: toast.bounds.width + Theme.Space.l, y: 0)
+        Theme.Motion.spring(Theme.Motion.slow) {
+            toast.alpha = 1
+            toast.transform = .identity
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + Theme.Timing.toastDuration) { [weak self, weak toast] in
+            guard let self, let toast, self.toastViews.contains(where: { $0 === toast }) else { return }
+            Theme.Motion.animate(Theme.Motion.normal, animations: {
+                toast.alpha = 0
+                toast.transform = CGAffineTransform(translationX: Theme.Space.l, y: 0)
+            }) { _ in
                 toast.removeFromSuperview()
-                self?.toastViews.removeAll { $0 === toast }
+                self.toastViews.removeAll { $0 === toast }
+                self.positionToasts(animated: true)
             }
         }
     }
 
-    private func showAbout() {
-        aboutPanel?.removeFromSuperview()
-        let panel = UIVisualEffectView(effect: UIBlurEffect(style: .systemThickMaterialDark))
-        panel.frame = CGRect(x: 0, y: 0, width: 520, height: 420)
-        panel.center = CGPoint(x: view.bounds.midX, y: view.bounds.midY)
-        panel.layer.cornerRadius = 16
-        panel.clipsToBounds = true
-        panel.layer.borderWidth = 0.5
-        panel.layer.borderColor = Theme.border.cgColor
-        let title = UILabel(frame: CGRect(x: 24, y: 22, width: 472, height: 30))
-        title.text = "DeskMode"
-        title.font = Theme.font(22, weight: .bold)
-        title.textColor = Theme.text
-        let body = UILabel(frame: CGRect(x: 24, y: 60, width: 472, height: 300))
-        body.numberOfLines = 0
-        body.font = Theme.monoFont(12.5)
-        body.textColor = Theme.secondaryText
-        body.text = """
-        A desktop for your iPhone on an external display.
-
-        ⌘Space        Launcher          ⌘`            Cycle windows
-        ⌘N            New browser window ⌘T           New tab
-        ⌘W            Close tab / window ⇧⌘T          Reopen closed tab
-        ⌘L            Address bar        ⌘R           Reload
-        ⌘[ / ⌘]       Back / forward     ⌃Tab         Next tab
-        ⌘1…9          Switch tab         ⌘F           Find in page
-        ⌘+ / ⌘−       Zoom page          ⌘0           Actual size
-        ⌘M            Minimize           ⌃⌥← / ⌃⌥→    Tile left / right
-        ⌃⌥↩           Fill screen        ⌘,           Settings
-        Esc           Close menus / launcher
-        """
-        let close = DeskButton(title: "OK", style: .primary)
-        close.frame = CGRect(x: 420, y: 370, width: 76, height: 30)
-        close.onTap = { [weak self] in
-            self?.aboutPanel?.removeFromSuperview()
-            self?.aboutPanel = nil
+    private func positionToasts(animated: Bool) {
+        var y = Theme.menuBarHeight + Theme.Space.m
+        let right = view.bounds.width - Theme.Space.m
+        for toast in toastViews {
+            let origin = CGPoint(x: right - toast.bounds.width, y: y)
+            if animated {
+                Theme.Motion.animate(Theme.Motion.normal) { toast.frame.origin = origin }
+            } else {
+                toast.frame.origin = origin
+            }
+            y += toast.bounds.height + Theme.Space.s
         }
-        panel.contentView.addSubview(title)
-        panel.contentView.addSubview(body)
-        panel.contentView.addSubview(close)
+    }
+
+    // MARK: - Dialogs
+
+    private func present(_ panel: DialogPanelView) {
+        dismissDialog()
+        dismissPopup()
+        tooltips.cancel()
+        panel.onClose = { [weak self] in self?.dismissDialog() }
+        panel.center = CGPoint(x: view.bounds.midX, y: view.bounds.midY - Theme.Space.xl)
+        panel.frame = panel.frame.integral
         overlay.addSubview(panel)
-        aboutPanel = panel
+        dialog = panel
+        panel.alpha = 0
+        panel.transform = CGAffineTransform(scaleX: Theme.Motion.appearScale, y: Theme.Motion.appearScale)
+        Theme.Motion.spring(0.3) {
+            panel.alpha = 1
+            panel.transform = .identity
+        }
+    }
+
+    private func dismissDialog() {
+        guard let dialog else { return }
+        self.dialog = nil
+        Theme.Motion.animate(Theme.Motion.fast, animations: {
+            dialog.alpha = 0
+            dialog.transform = CGAffineTransform(scaleX: Theme.Motion.disappearScale, y: Theme.Motion.disappearScale)
+        }) { _ in dialog.removeFromSuperview() }
+    }
+
+    private func showAbout() {
+        present(AboutPanelView(displaySize: view.bounds.size, displayScale: view.traitCollection.displayScale))
+    }
+
+    private func showShortcuts() {
+        present(ShortcutsPanelView())
     }
 
     // MARK: - Menu actions
@@ -369,6 +447,7 @@ final class DesktopViewController: UIViewController, InputSink {
         let focused = windowManager.focused
         switch action {
         case .about: showAbout()
+        case .keyboardShortcuts: showShortcuts()
         case .settings: open(.settings)
         case .launcher: toggleLauncher()
         case .newWindow: open(.browser, forceNew: true)
@@ -408,33 +487,41 @@ final class DesktopViewController: UIViewController, InputSink {
 
     private func desktopContextMenu(at point: CGPoint) {
         var items: [MenuItem] = [
-            MenuItem(title: "New Browser Window", symbol: "safari") { [weak self] in self?.open(.browser, forceNew: true) },
-            MenuItem(title: "New Note", symbol: "note.text") { [weak self] in self?.performAction(.newNote) },
+            MenuItem(title: "New \(DeskApp.browser.title) Window", symbol: DeskApp.browser.symbolName) { [weak self] in self?.open(.browser, forceNew: true) },
+            MenuItem(title: "New Note", symbol: DeskApp.notes.symbolName) { [weak self] in self?.performAction(.newNote) },
+            MenuItem(title: "New Task", symbol: DeskApp.tasks.symbolName) { [weak self] in self?.performAction(.newTask) },
             .separator
         ]
         for wp in Wallpaper.allCases {
             items.append(MenuItem(title: "Wallpaper: \(wp.title)", isChecked: settings.wallpaper == wp) { Settings.shared.wallpaper = wp })
         }
         items.append(.separator)
-        items.append(MenuItem(title: "Settings…", symbol: "gearshape") { [weak self] in self?.open(.settings) })
+        items.append(MenuItem(title: "Settings…", symbol: DeskApp.settings.symbolName) { [weak self] in self?.open(.settings) })
         presentContextMenu(items: items, at: point)
     }
 
     // MARK: - Hit testing
 
+    /// Finds the `PointerTarget` under a desktop point.
+    ///
+    /// Overlay content (menus, launcher, dialogs) and the chrome always win. Otherwise a window's
+    /// resize zone (`Theme.Size.resizeZone`, extending `resizeOutset` beyond its frame) wins over
+    /// anything inside the window. Finally the hit view's ancestors are walked up to the nearest
+    /// target; for content that draws its own title bar this walk reaches the window itself for
+    /// any point in the top `Theme.titleBarHeight` that no inner target claims, so dragging works.
     private func target(at point: CGPoint) -> (PointerTarget, UIView)? {
         let touchEnabled = touchCapture.isUserInteractionEnabled
         touchCapture.isUserInteractionEnabled = false
         defer { touchCapture.isUserInteractionEnabled = touchEnabled }
         guard let hit = view.hitTest(point, with: nil) else { return nil }
 
-        // Overlay content (menus, launcher, about) and the chrome always win.
         let isOverlay = hit.isDescendant(of: overlay) || hit.isDescendant(of: menuBar) || hit.isDescendant(of: dock)
         if !isOverlay {
-            // Resize edges extend slightly outside a window's frame and over its content.
+            let outset = Theme.Size.resizeOutset
+            let inset = Theme.Size.resizeZone - Theme.Size.resizeOutset
             for w in windowManager.visibleWindows.reversed() {
                 let f = w.frame
-                if f.insetBy(dx: -5, dy: -5).contains(point), !f.insetBy(dx: 6, dy: 6).contains(point) {
+                if f.insetBy(dx: -outset, dy: -outset).contains(point), !f.insetBy(dx: inset, dy: inset).contains(point) {
                     return (w, w)
                 }
                 if f.contains(point) { break }
@@ -478,6 +565,7 @@ final class DesktopViewController: UIViewController, InputSink {
         case .move:
             updateHover(at: event.location)
         case .down(let button):
+            tooltips.hide()
             let found = target(at: event.location)
             if let popup {
                 let insideMenu = found.map { $0.1.isDescendant(of: popup) } ?? false
@@ -525,7 +613,9 @@ final class DesktopViewController: UIViewController, InputSink {
         } else {
             cursorView.style = .arrow
         }
-        // Reveal traffic-light glyphs when hovering any part of a title bar.
+        tooltips.update(target: found?.0, at: point)
+        // Reveal traffic-light glyphs when hovering any part of a title bar (also for content
+        // that draws its own title bar, whose top strip belongs to the window for dragging).
         for w in windowManager.visibleWindows {
             let local = view.convert(point, to: w)
             w.trafficLightsHover(w.bounds.contains(local) && local.y < Theme.titleBarHeight)
@@ -545,13 +635,19 @@ final class DesktopViewController: UIViewController, InputSink {
         }
         if let popup {
             if event.isDown {
-                if event.isEscape { dismissPopup() } else { _ = popup.key(event) }
+                if event.isEscape { dismissPopup() }
+                else if !popup.key(event) {
+                    switch event.keyCode {
+                    case .keyboardLeftArrow: menuBar.switchOpenMenu(by: -1)
+                    case .keyboardRightArrow: menuBar.switchOpenMenu(by: 1)
+                    default: break
+                    }
+                }
             }
             return
         }
-        if aboutPanel != nil, event.isDown, event.isEscape {
-            aboutPanel?.removeFromSuperview()
-            aboutPanel = nil
+        if dialog != nil, event.isDown, event.isEscape || event.isEnter {
+            dismissDialog()
             return
         }
 
@@ -584,6 +680,7 @@ final class DesktopViewController: UIViewController, InputSink {
             if e.letter == "w", e.shift { return .closeWindow }
             if e.letter == "n", e.option { return .newNote }
             if e.letter == "t", e.option { return .newTask }
+            if e.charactersIgnoringModifiers == "/", e.shift { return .keyboardShortcuts }
         }
         if e.control, e.option {
             switch e.keyCode {

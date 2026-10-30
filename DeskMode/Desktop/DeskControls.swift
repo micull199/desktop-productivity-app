@@ -6,39 +6,43 @@ import UIKit
 final class DeskButton: UIView, PointerTarget {
 
     enum Style {
-        case plain        // transparent, highlight on hover
+        case plain        // transparent, highlight on hover (menu-bar titles, traffic lights)
         case toolbar      // small rounded icon button
         case primary      // accent filled
         case menuItem     // full-width row inside a popup menu
         case list         // full-width row inside a sidebar list
-        case pill         // rounded capsule with text
+        case pill         // 24 pt capsule with text
     }
 
     var onTap: (() -> Void)?
     var onRightClick: ((CGPoint) -> Void)?
     var onDoubleClick: (() -> Void)?
+    /// Called when the cursor enters (`true`) or leaves (`false`) the button.
+    var onHoverChange: ((Bool) -> Void)?
 
     var isEnabled = true { didSet { refresh() } }
     /// Traffic lights and other custom-drawn buttons turn this off.
     var showsHoverHighlight = true { didSet { refresh() } }
     var isSelected = false { didSet { refresh() } }
     var tintOverride: UIColor? { didSet { refresh() } }
+    /// Shown by the desktop after the cursor rests on the button (see `PointerTarget`).
+    var tooltipText: String?
 
     var title: String? {
         get { label.text }
-        set { label.text = newValue; setNeedsLayout() }
+        set { label.text = newValue; invalidateIntrinsicContentSize(); setNeedsLayout() }
     }
 
     var subtitle: String? {
         get { subtitleLabel.text }
-        set { subtitleLabel.text = newValue; subtitleLabel.isHidden = (newValue ?? "").isEmpty; setNeedsLayout() }
+        set { subtitleLabel.text = newValue; subtitleLabel.isHidden = (newValue ?? "").isEmpty; invalidateIntrinsicContentSize(); setNeedsLayout() }
     }
 
     var symbolName: String? {
         didSet { updateIcon() }
     }
     var image: UIImage? {
-        didSet { icon.image = image; icon.isHidden = image == nil; setNeedsLayout() }
+        didSet { icon.image = image; icon.isHidden = image == nil; invalidateIntrinsicContentSize(); setNeedsLayout() }
     }
 
     var font: UIFont {
@@ -48,8 +52,14 @@ final class DeskButton: UIView, PointerTarget {
 
     var shortcutText: String? {
         get { shortcutLabel.text }
-        set { shortcutLabel.text = newValue; shortcutLabel.isHidden = (newValue ?? "").isEmpty; setNeedsLayout() }
+        set { shortcutLabel.text = newValue; shortcutLabel.isHidden = (newValue ?? "").isEmpty; invalidateIntrinsicContentSize(); setNeedsLayout() }
     }
+
+    /// When set, the icon occupies a fixed-width column whether or not an icon is present, so
+    /// titles in a list of rows line up (used by popup menus).
+    var iconColumnWidth: CGFloat? { didSet { invalidateIntrinsicContentSize(); setNeedsLayout() } }
+
+    private(set) var isHovered = false
 
     let style: Style
     private let highlight = UIView()
@@ -57,10 +67,11 @@ final class DeskButton: UIView, PointerTarget {
     private let subtitleLabel = UILabel()
     private let shortcutLabel = UILabel()
     private let icon = UIImageView()
-    private var hovered = false
     private var pressed = false
     var iconPointSize: CGFloat = 14 { didSet { updateIcon() } }
-    var contentInsets = UIEdgeInsets(top: 4, left: 10, bottom: 4, right: 10)
+    var contentInsets = UIEdgeInsets(top: 4, left: Theme.Space.m - 2, bottom: 4, right: Theme.Space.m - 2) {
+        didSet { invalidateIntrinsicContentSize(); setNeedsLayout() }
+    }
 
     init(title: String? = nil, symbol: String? = nil, style: Style = .plain) {
         self.style = style
@@ -71,30 +82,42 @@ final class DeskButton: UIView, PointerTarget {
         addSubview(subtitleLabel)
         addSubview(shortcutLabel)
         highlight.isUserInteractionEnabled = false
+        highlight.layer.cornerCurve = .continuous
         icon.contentMode = .center
         icon.isHidden = true
         label.text = title
-        label.font = Theme.font(13, weight: style == .primary ? .semibold : .regular)
+        label.font = Theme.font(Theme.Text.body, weight: style == .primary ? .semibold : .regular)
         label.textColor = Theme.text
         label.lineBreakMode = .byTruncatingTail
-        subtitleLabel.font = Theme.font(11)
+        subtitleLabel.font = Theme.font(Theme.Text.caption)
         subtitleLabel.textColor = Theme.secondaryText
         subtitleLabel.isHidden = true
-        shortcutLabel.font = Theme.font(12)
-        shortcutLabel.textColor = Theme.tertiaryText
+        shortcutLabel.font = Theme.font(Theme.Text.footnote)
+        shortcutLabel.textColor = Theme.secondaryText
         shortcutLabel.isHidden = true
         shortcutLabel.textAlignment = .right
         symbolName = symbol
         switch style {
-        case .plain: highlight.layer.cornerRadius = 5
-        case .toolbar: highlight.layer.cornerRadius = 6; contentInsets = UIEdgeInsets(top: 4, left: 6, bottom: 4, right: 6)
-        case .primary: highlight.layer.cornerRadius = 7
-        case .menuItem: highlight.layer.cornerRadius = 5; contentInsets = UIEdgeInsets(top: 4, left: 10, bottom: 4, right: 10)
-        case .list: highlight.layer.cornerRadius = 7; contentInsets = UIEdgeInsets(top: 6, left: 10, bottom: 6, right: 10)
-        case .pill: highlight.layer.cornerRadius = 12; contentInsets = UIEdgeInsets(top: 3, left: 10, bottom: 3, right: 10)
+        case .plain:
+            highlight.layer.cornerRadius = Theme.Radius.menuBarItem
+        case .toolbar:
+            highlight.layer.cornerRadius = Theme.Radius.control
+            contentInsets = UIEdgeInsets(top: 4, left: 6, bottom: 4, right: 6)
+        case .primary:
+            highlight.layer.cornerRadius = Theme.Radius.control
+            contentInsets = UIEdgeInsets(top: 4, left: Theme.Space.l, bottom: 4, right: Theme.Space.l)
+        case .menuItem:
+            highlight.layer.cornerRadius = Theme.Radius.menuBarItem
+            contentInsets = UIEdgeInsets(top: 4, left: Theme.Space.s, bottom: 4, right: Theme.Space.m - 2)
+        case .list:
+            highlight.layer.cornerRadius = Theme.Radius.field
+            contentInsets = UIEdgeInsets(top: 6, left: Theme.Space.m - 2, bottom: 6, right: Theme.Space.m - 2)
+        case .pill:
+            highlight.layer.cornerRadius = Theme.Radius.pill
+            contentInsets = UIEdgeInsets(top: 3, left: Theme.Space.m, bottom: 3, right: Theme.Space.m)
         }
         updateIcon()
-        refresh()
+        refresh(animated: false)
     }
 
     required init?(coder: NSCoder) { fatalError() }
@@ -102,37 +125,44 @@ final class DeskButton: UIView, PointerTarget {
     private func updateIcon() {
         guard let symbolName else {
             if image == nil { icon.isHidden = true }
+            invalidateIntrinsicContentSize()
             return
         }
         icon.image = UIImage.symbol(symbolName, size: iconPointSize, weight: .medium)
         icon.isHidden = false
+        invalidateIntrinsicContentSize()
         setNeedsLayout()
+    }
+
+    private var iconSlotWidth: CGFloat {
+        if let iconColumnWidth { return iconColumnWidth }
+        return icon.isHidden ? 0 : iconPointSize + Theme.Space.s
     }
 
     override var intrinsicContentSize: CGSize {
         let labelSize = label.text?.isEmpty == false ? label.intrinsicContentSize : .zero
-        let iconW: CGFloat = icon.isHidden ? 0 : (iconPointSize + 8)
-        let gap: CGFloat = (!icon.isHidden && labelSize.width > 0) ? 6 : 0
-        let shortcutW: CGFloat = shortcutLabel.isHidden ? 0 : shortcutLabel.intrinsicContentSize.width + 24
+        let iconW = iconSlotWidth
+        let gap: CGFloat = (iconW > 0 && labelSize.width > 0) ? 6 : 0
+        let shortcutW: CGFloat = shortcutLabel.isHidden ? 0 : shortcutLabel.intrinsicContentSize.width + Theme.Space.xl
         let subtitleH: CGFloat = subtitleLabel.isHidden ? 0 : subtitleLabel.intrinsicContentSize.height
-        let h = max(labelSize.height + subtitleH, iconPointSize + 8) + contentInsets.top + contentInsets.bottom
-        return CGSize(width: iconW + gap + labelSize.width + shortcutW + contentInsets.left + contentInsets.right, height: max(h, 24))
+        let h = max(labelSize.height + subtitleH, icon.isHidden ? 0 : iconPointSize + Theme.Space.s) + contentInsets.top + contentInsets.bottom
+        return CGSize(width: iconW + gap + labelSize.width + shortcutW + contentInsets.left + contentInsets.right, height: max(h, Theme.Size.controlSmall))
     }
 
     override func layoutSubviews() {
         super.layoutSubviews()
         highlight.frame = bounds
         var x = contentInsets.left
-        if !icon.isHidden {
-            let w = iconPointSize + 8
-            icon.frame = CGRect(x: x, y: 0, width: w, height: bounds.height)
-            x += w + (label.text?.isEmpty == false ? 6 : 0)
+        let iconW = iconSlotWidth
+        if iconW > 0 {
+            icon.frame = CGRect(x: x, y: 0, width: iconW, height: bounds.height)
+            x += iconW + (label.text?.isEmpty == false ? 6 : 0)
         }
         var right = bounds.width - contentInsets.right
         if !shortcutLabel.isHidden {
             let w = shortcutLabel.intrinsicContentSize.width
             shortcutLabel.frame = CGRect(x: right - w, y: 0, width: w, height: bounds.height)
-            right -= w + 16
+            right -= w + Theme.Space.l
         }
         let available = max(0, right - x)
         if subtitleLabel.isHidden {
@@ -146,37 +176,51 @@ final class DeskButton: UIView, PointerTarget {
         }
     }
 
-    private func refresh() {
-        alpha = isEnabled ? 1 : 0.4
+    private func refresh(animated: Bool = true) {
         let tint = tintOverride ?? Theme.text
-        label.textColor = tint
-        icon.tintColor = tint
-        switch style {
-        case .primary:
-            highlight.backgroundColor = pressed ? Theme.accent.withAlphaComponent(0.7) : (hovered ? Theme.accent.withAlphaComponent(0.9) : Theme.accent)
-            label.textColor = .white
-            icon.tintColor = .white
-        case .menuItem:
-            highlight.backgroundColor = hovered ? Theme.accent : .clear
-            label.textColor = hovered ? .white : tint
-            shortcutLabel.textColor = hovered ? UIColor.white.withAlphaComponent(0.8) : Theme.tertiaryText
-            icon.tintColor = hovered ? .white : tint
-        case .list:
-            highlight.backgroundColor = isSelected ? Theme.accent.withAlphaComponent(0.85) : (hovered ? Theme.controlBackgroundHover : .clear)
-            label.textColor = isSelected ? .white : tint
-            subtitleLabel.textColor = isSelected ? UIColor.white.withAlphaComponent(0.75) : Theme.secondaryText
-            icon.tintColor = isSelected ? .white : tint
-        case .pill:
-            highlight.backgroundColor = isSelected ? Theme.accent : (hovered ? Theme.controlBackgroundHover : Theme.controlBackground)
-            label.textColor = isSelected ? .white : tint
-        case .plain, .toolbar:
-            if !showsHoverHighlight {
-                highlight.backgroundColor = .clear
-            } else if isSelected {
-                highlight.backgroundColor = Theme.controlBackgroundPressed
-            } else {
-                highlight.backgroundColor = pressed ? Theme.controlBackgroundPressed : (hovered ? Theme.controlBackgroundHover : .clear)
+        let apply = { [self] in
+            alpha = isEnabled ? 1 : Theme.disabledAlpha
+            label.textColor = tint
+            icon.tintColor = tint
+            switch style {
+            case .primary:
+                highlight.backgroundColor = pressed ? Theme.accentPressed : (isHovered ? Theme.accentHover : Theme.accent)
+                label.textColor = Theme.textOnAccent
+                icon.tintColor = Theme.textOnAccent
+            case .menuItem:
+                let lit = isHovered && isEnabled
+                highlight.backgroundColor = lit ? Theme.accent : .clear
+                label.textColor = lit ? Theme.textOnAccent : tint
+                shortcutLabel.textColor = lit ? Theme.textOnSelectionSecondary : Theme.secondaryText
+                icon.tintColor = lit ? Theme.textOnAccent : tint
+            case .list:
+                highlight.backgroundColor = isSelected ? Theme.accent : (isHovered ? Theme.hoverOverlay : .clear)
+                label.textColor = isSelected ? Theme.textOnAccent : tint
+                subtitleLabel.textColor = isSelected ? Theme.textOnSelectionSecondary : Theme.secondaryText
+                icon.tintColor = isSelected ? Theme.textOnAccent : tint
+            case .pill:
+                if isSelected {
+                    highlight.backgroundColor = pressed ? Theme.accentPressed : (isHovered ? Theme.accentHover : Theme.accent)
+                } else {
+                    highlight.backgroundColor = pressed ? Theme.controlBackgroundPressed : (isHovered ? Theme.controlBackgroundHover : Theme.controlBackground)
+                }
+                label.textColor = isSelected ? Theme.textOnAccent : tint
+                icon.tintColor = isSelected ? Theme.textOnAccent : tint
+            case .plain, .toolbar:
+                if !showsHoverHighlight {
+                    // Menu-bar titles and traffic lights: no hover fill, but an open menu still shows.
+                    highlight.backgroundColor = isSelected ? Theme.pressedOverlay : .clear
+                } else if isSelected {
+                    highlight.backgroundColor = Theme.pressedOverlay
+                } else {
+                    highlight.backgroundColor = pressed ? Theme.pressedOverlay : (isHovered ? Theme.hoverOverlay : .clear)
+                }
             }
+        }
+        if animated, window != nil {
+            Theme.Motion.animate(Theme.Motion.fast, animations: apply)
+        } else {
+            apply()
         }
     }
 
@@ -202,30 +246,33 @@ final class DeskButton: UIView, PointerTarget {
         }
     }
 
-    func pointerEntered() { hovered = true; refresh() }
-    func pointerExited() { hovered = false; pressed = false; refresh() }
+    func pointerEntered() { isHovered = true; refresh(); onHoverChange?(true) }
+    func pointerExited() { isHovered = false; pressed = false; refresh(); onHoverChange?(false) }
     func cursorStyle(at local: CGPoint) -> CursorStyle { .arrow }
 }
 
 // MARK: - Toggle
 
-/// A macOS-style switch.
+/// A macOS-style switch: 38 × 22, 18 pt knob, spring animated.
 final class DeskToggle: UIView, PointerTarget {
 
     var isOn: Bool { didSet { animateKnob() } }
     var onChange: ((Bool) -> Void)?
+    var tooltipText: String?
 
     private let track = UIView()
     private let knob = UIView()
+    private var hovered = false
+    private var pressed = false
 
     init(isOn: Bool) {
         self.isOn = isOn
-        super.init(frame: CGRect(x: 0, y: 0, width: 40, height: 24))
+        super.init(frame: CGRect(x: 0, y: 0, width: Theme.Size.toggleWidth, height: Theme.Size.toggleHeight))
         addSubview(track)
         track.addSubview(knob)
-        track.layer.cornerRadius = 12
+        track.layer.cornerCurve = .continuous
         knob.backgroundColor = .white
-        knob.layer.cornerRadius = 10
+        knob.layer.cornerCurve = .continuous
         knob.layer.shadowColor = UIColor.black.cgColor
         knob.layer.shadowOpacity = 0.3
         knob.layer.shadowRadius = 2
@@ -235,29 +282,61 @@ final class DeskToggle: UIView, PointerTarget {
 
     required init?(coder: NSCoder) { fatalError() }
 
-    override var intrinsicContentSize: CGSize { CGSize(width: 40, height: 24) }
+    override var intrinsicContentSize: CGSize { CGSize(width: Theme.Size.toggleWidth, height: Theme.Size.toggleHeight) }
 
     override func layoutSubviews() {
         super.layoutSubviews()
         track.frame = bounds
+        track.layer.cornerRadius = bounds.height / 2
         animateKnob(animated: false)
     }
 
+    private var knobFrame: CGRect {
+        let inset = (bounds.height - Theme.Size.toggleKnob) / 2
+        let size = bounds.height - inset * 2
+        let x = isOn ? bounds.width - size - inset : inset
+        return CGRect(x: x, y: inset, width: size, height: size)
+    }
+
     private func animateKnob(animated: Bool = true) {
-        let apply = {
-            self.track.backgroundColor = self.isOn ? Theme.accent : UIColor(white: 1, alpha: 0.18)
-            self.knob.frame = CGRect(x: self.isOn ? self.bounds.width - 22 : 2, y: 2, width: 20, height: 20)
+        let apply = { [self] in
+            if isOn {
+                track.backgroundColor = pressed ? Theme.accentPressed : (hovered ? Theme.accentHover : Theme.accent)
+            } else {
+                track.backgroundColor = hovered || pressed ? Theme.toggleOffTrackHover : Theme.toggleOffTrack
+            }
+            let f = knobFrame
+            knob.frame = pressed ? f.insetBy(dx: -1, dy: 0).offsetBy(dx: isOn ? -1 : 1, dy: 0) : f
+            knob.layer.cornerRadius = knob.bounds.height / 2
+            knob.layer.shadowPath = UIBezierPath(roundedRect: knob.bounds, cornerRadius: knob.bounds.height / 2).cgPath
         }
-        if animated { UIView.animate(withDuration: 0.18, animations: apply) } else { apply() }
+        if animated, window != nil {
+            Theme.Motion.spring(Theme.Motion.normal, animations: apply)
+        } else {
+            apply()
+        }
     }
 
     func pointer(_ event: PointerEvent, local: CGPoint) {
-        if event.isLeftUp, bounds.insetBy(dx: -4, dy: -4).contains(local) {
-            isOn.toggle()
-            onChange?(isOn)
+        switch event.kind {
+        case .down(.left):
+            pressed = true
+            animateKnob()
+        case .up(.left):
+            pressed = false
+            if bounds.insetBy(dx: -Theme.Space.xs, dy: -Theme.Space.xs).contains(local) {
+                isOn.toggle()
+                onChange?(isOn)
+            } else {
+                animateKnob()
+            }
+        default:
+            break
         }
     }
 
+    func pointerEntered() { hovered = true; animateKnob() }
+    func pointerExited() { hovered = false; pressed = false; animateKnob() }
     func cursorStyle(at local: CGPoint) -> CursorStyle { .arrow }
 }
 
@@ -269,11 +348,14 @@ final class DeskTextField: UIView, PointerTarget, Focusable {
 
     var text: String = "" { didSet { caretIndex = min(caretIndex, text.count); onChange?(text); setNeedsLayout() } }
     var placeholder: String = "" { didSet { setNeedsLayout() } }
-    var font: UIFont = Theme.font(13) { didSet { label.font = font; placeholderLabel.font = font } }
-    var textAlignment: NSTextAlignment = .left
-    var leadingSymbol: String? { didSet { leadingIcon.image = leadingSymbol.flatMap { UIImage.symbol($0, size: 12) }; setNeedsLayout() } }
+    var font: UIFont = Theme.font(Theme.Text.body) { didSet { label.font = font; placeholderLabel.font = font; setNeedsLayout() } }
+    var textAlignment: NSTextAlignment = .left { didSet { setNeedsLayout() } }
+    var leadingSymbol: String? { didSet { updateLeadingIcon() } }
+    /// Point size of `leadingSymbol` (12 by default; the launcher uses 18).
+    var leadingSymbolPointSize: CGFloat = 12 { didSet { updateLeadingIcon() } }
     var selectsAllOnFocus = false
     var showsBackground = true { didSet { refresh() } }
+    var tooltipText: String?
 
     var onChange: ((String) -> Void)?
     var onSubmit: ((String) -> Void)?
@@ -287,6 +369,7 @@ final class DeskTextField: UIView, PointerTarget, Focusable {
     private(set) var hasFocus = false
     private(set) var caretIndex = 0
     private var isAllSelected = false
+    private var hovered = false
 
     private let background = UIView()
     private let label = UILabel()
@@ -297,7 +380,9 @@ final class DeskTextField: UIView, PointerTarget, Focusable {
     private let clip = UIView()
     private var scrollOffset: CGFloat = 0
     private var blinkTimer: Timer?
-    var insets = UIEdgeInsets(top: 0, left: 10, bottom: 0, right: 10)
+    var insets = UIEdgeInsets(top: 0, left: Theme.Space.m - 2, bottom: 0, right: Theme.Space.m - 2) { didSet { setNeedsLayout() } }
+
+    private static let caretWidth: CGFloat = 1.5
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -309,8 +394,9 @@ final class DeskTextField: UIView, PointerTarget, Focusable {
         clip.addSubview(placeholderLabel)
         clip.addSubview(label)
         clip.addSubview(caret)
-        background.layer.cornerRadius = 7
-        background.layer.borderWidth = 1
+        background.layer.cornerRadius = Theme.Radius.field
+        background.layer.cornerCurve = .continuous
+        background.isUserInteractionEnabled = false
         leadingIcon.contentMode = .center
         leadingIcon.tintColor = Theme.secondaryText
         label.font = font
@@ -318,23 +404,31 @@ final class DeskTextField: UIView, PointerTarget, Focusable {
         placeholderLabel.font = font
         placeholderLabel.textColor = Theme.tertiaryText
         selectionView.backgroundColor = Theme.selection
+        selectionView.layer.cornerRadius = 2
         selectionView.isHidden = true
-        caret.backgroundColor = Theme.accentText
+        caret.backgroundColor = Theme.caret
+        caret.layer.cornerRadius = Self.caretWidth / 2
         caret.isHidden = true
-        refresh()
+        refresh(animated: false)
     }
 
     required init?(coder: NSCoder) { fatalError() }
 
-    override var intrinsicContentSize: CGSize { CGSize(width: UIView.noIntrinsicMetric, height: 30) }
+    override var intrinsicContentSize: CGSize { CGSize(width: UIView.noIntrinsicMetric, height: Theme.Size.control) }
+
+    private func updateLeadingIcon() {
+        leadingIcon.image = leadingSymbol.flatMap { UIImage.symbol($0, size: leadingSymbolPointSize) }
+        setNeedsLayout()
+    }
 
     override func layoutSubviews() {
         super.layoutSubviews()
         background.frame = bounds
         var left = insets.left
         if leadingSymbol != nil {
-            leadingIcon.frame = CGRect(x: 8, y: 0, width: 20, height: bounds.height)
-            left = 32
+            let w = leadingSymbolPointSize + Theme.Space.s
+            leadingIcon.frame = CGRect(x: insets.left, y: 0, width: w, height: bounds.height)
+            left = insets.left + w + 6
         } else {
             leadingIcon.frame = .zero
         }
@@ -358,17 +452,33 @@ final class DeskTextField: UIView, PointerTarget, Focusable {
         label.frame = CGRect(x: -scrollOffset, y: 0, width: max(textWidth, 1), height: bounds.height)
         placeholderLabel.text = placeholder
         placeholderLabel.isHidden = !text.isEmpty
-        placeholderLabel.frame = CGRect(x: textAlignment == .center ? 0 : 0, y: 0, width: clip.bounds.width, height: bounds.height)
+        placeholderLabel.frame = CGRect(x: 0, y: 0, width: clip.bounds.width, height: bounds.height)
         placeholderLabel.textAlignment = textAlignment
-        selectionView.frame = CGRect(x: -scrollOffset - 1, y: 6, width: textWidth + 2, height: bounds.height - 12)
+        let lineHeight = font.lineHeight + 4
+        let textTop = (bounds.height - lineHeight) / 2
+        selectionView.frame = CGRect(x: -scrollOffset - 1, y: textTop, width: textWidth + 2, height: lineHeight)
         selectionView.isHidden = !(isAllSelected && hasFocus && !text.isEmpty)
-        caret.frame = CGRect(x: caretX - scrollOffset, y: 7, width: 1.5, height: bounds.height - 14)
+        caret.frame = CGRect(x: caretX - scrollOffset, y: textTop + 1, width: Self.caretWidth, height: lineHeight - 2)
     }
 
-    private func refresh() {
-        background.isHidden = !showsBackground
-        background.backgroundColor = hasFocus ? UIColor(white: 1, alpha: 0.1) : Theme.controlBackground
-        background.layer.borderColor = hasFocus ? Theme.accent.withAlphaComponent(0.9).cgColor : UIColor(white: 1, alpha: 0.1).cgColor
+    private func refresh(animated: Bool = true) {
+        let apply = { [self] in
+            background.isHidden = !showsBackground
+            if hasFocus {
+                background.backgroundColor = Theme.accentSoft
+                background.layer.borderWidth = 2
+                background.layer.borderColor = Theme.focusRing.cgColor
+            } else {
+                background.backgroundColor = hovered ? Theme.controlBackgroundHover : Theme.controlBackground
+                background.layer.borderWidth = Theme.Size.hairline
+                background.layer.borderColor = (hovered ? Theme.borderStrong : Theme.border).cgColor
+            }
+        }
+        if animated, window != nil {
+            Theme.Motion.animate(Theme.Motion.fast, animations: apply)
+        } else {
+            apply()
+        }
         setNeedsLayout()
     }
 
@@ -396,7 +506,7 @@ final class DeskTextField: UIView, PointerTarget, Focusable {
     private func startBlink() {
         caret.isHidden = false
         blinkTimer?.invalidate()
-        blinkTimer = Timer.scheduledTimer(withTimeInterval: 0.55, repeats: true) { [weak self] _ in
+        blinkTimer = Timer.scheduledTimer(withTimeInterval: Theme.Timing.caretBlink, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.caret.isHidden.toggle() }
         }
     }
@@ -427,6 +537,8 @@ final class DeskTextField: UIView, PointerTarget, Focusable {
         }
     }
 
+    func pointerEntered() { hovered = true; refresh() }
+    func pointerExited() { hovered = false; refresh() }
     func cursorStyle(at local: CGPoint) -> CursorStyle { .iBeam }
 
     private func index(at local: CGPoint) -> Int {
@@ -454,7 +566,7 @@ final class DeskTextField: UIView, PointerTarget, Focusable {
         if event.command {
             switch event.letter {
             case "a": selectAll(); return true
-            case "c": UIPasteboard.general.string = isAllSelected ? text : text; return true
+            case "c": UIPasteboard.general.string = text; return true
             case "x": UIPasteboard.general.string = text; replaceAll(with: ""); return true
             case "v":
                 if let s = UIPasteboard.general.string?.replacingOccurrences(of: "\n", with: " ") { insert(s) }
@@ -553,10 +665,14 @@ struct MenuItem {
 }
 
 /// A floating list of actions used for menu-bar menus, context menus and dock menus.
+///
+/// Rows are `Theme.Size.menuRow` tall with a fixed icon column so titles line up, shortcuts are
+/// right-aligned, separators are hairlines and disabled rows are dimmed. Arrow keys and Return
+/// work while the menu is open; the desktop handles Escape and clicks outside.
 final class PopupMenuView: UIView, PointerTarget {
 
     var onDismiss: (() -> Void)?
-    private let blur = UIVisualEffectView(effect: UIBlurEffect(style: .systemThickMaterialDark))
+    private let material = Theme.materialView(.menu, cornerRadius: Theme.Radius.menu)
     private let stack = UIStackView()
     private var highlightedIndex: Int?
     private var buttons: [DeskButton] = []
@@ -565,52 +681,69 @@ final class PopupMenuView: UIView, PointerTarget {
     init(items: [MenuItem], minWidth: CGFloat = 220) {
         self.items = items
         super.init(frame: .zero)
-        addSubview(blur)
-        blur.layer.cornerRadius = 9
-        blur.clipsToBounds = true
-        layer.cornerRadius = 9
-        layer.borderWidth = 0.5
-        layer.borderColor = Theme.border.cgColor
-        applyPanelShadow(radius: 22, opacity: 0.5)
+        addSubview(material)
+        layer.cornerRadius = Theme.Radius.menu
+        layer.cornerCurve = .continuous
+        material.layer.borderWidth = Theme.Size.hairline
+        material.layer.borderColor = Theme.border.cgColor
+        applyShadow(.menu)
         stack.axis = .vertical
-        stack.spacing = 1
-        blur.contentView.addSubview(stack)
+        stack.spacing = 0
+        material.contentView.addSubview(stack)
 
+        let inset = Theme.Size.menuInset
+        let row = Theme.Size.menuRow
+        let separatorHeight = Theme.Size.hairline + Theme.Space.xs * 2
         var width = minWidth
+        var height: CGFloat = 0
         for item in items {
             if item.isSeparator {
+                let wrap = UIView()
                 let sep = UIView()
                 sep.backgroundColor = Theme.separator
-                sep.heightAnchor.constraint(equalToConstant: 1).isActive = true
-                let wrap = UIView()
                 wrap.addSubview(sep)
-                sep.pin(to: wrap, insets: UIEdgeInsets(top: 4, left: 10, bottom: 4, right: 10))
+                sep.pin(to: wrap, insets: UIEdgeInsets(top: Theme.Space.xs, left: Theme.Space.s + 2, bottom: Theme.Space.xs, right: Theme.Space.s + 2))
+                sep.heightAnchor.constraint(equalToConstant: Theme.Size.hairline).isActive = true
                 stack.addArrangedSubview(wrap)
+                height += separatorHeight
                 continue
             }
             let b = DeskButton(title: item.title, symbol: item.isChecked ? "checkmark" : item.symbol, style: .menuItem)
+            b.iconPointSize = item.isChecked ? 11 : 13
+            b.iconColumnWidth = Theme.Size.menuIconColumn
             b.isEnabled = item.isEnabled
             b.shortcutText = item.shortcut
-            b.contentInsets = UIEdgeInsets(top: 4, left: item.isChecked || item.symbol != nil ? 8 : 26, bottom: 4, right: 10)
+            let index = buttons.count
             b.onTap = { [weak self] in
                 self?.onDismiss?()
                 item.action?()
             }
+            b.onHoverChange = { [weak self] on in self?.rowHovered(index, on) }
             buttons.append(b)
             stack.addArrangedSubview(b)
-            b.heightAnchor.constraint(equalToConstant: 26).isActive = true
-            width = max(width, b.intrinsicContentSize.width + 16)
+            b.heightAnchor.constraint(equalToConstant: row).isActive = true
+            height += row
+            width = max(width, b.intrinsicContentSize.width + inset * 2)
         }
-        let height = stack.arrangedSubviews.reduce(CGFloat(0)) { $0 + ($1 is DeskButton ? 26 : 9) } + CGFloat(stack.arrangedSubviews.count - 1)
-        frame = CGRect(x: 0, y: 0, width: width, height: height + 10)
+        frame = CGRect(x: 0, y: 0, width: ceil(width), height: height + inset * 2)
     }
 
     required init?(coder: NSCoder) { fatalError() }
 
     override func layoutSubviews() {
         super.layoutSubviews()
-        blur.frame = bounds
-        stack.frame = bounds.insetBy(dx: 5, dy: 5)
+        material.frame = bounds
+        stack.frame = bounds.insetBy(dx: Theme.Size.menuInset, dy: Theme.Size.menuInset)
+        layer.shadowPath = UIBezierPath(roundedRect: bounds, cornerRadius: Theme.Radius.menu).cgPath
+    }
+
+    private func rowHovered(_ index: Int, _ on: Bool) {
+        if on {
+            if let i = highlightedIndex, i != index { buttons[i].pointerExited() }
+            highlightedIndex = index
+        } else if highlightedIndex == index {
+            highlightedIndex = nil
+        }
     }
 
     /// Keyboard navigation (arrows + enter) while the menu is open.
@@ -620,16 +753,19 @@ final class PopupMenuView: UIView, PointerTarget {
         case .keyboardDownArrow: moveHighlight(1); return true
         case .keyboardUpArrow: moveHighlight(-1); return true
         case .keyboardReturnOrEnter, .keypadEnter:
-            if let i = highlightedIndex { buttons[i].onTap?() }
+            if let i = highlightedIndex, buttons[i].isEnabled { buttons[i].onTap?() }
             return true
         default: return false
         }
     }
 
     private func moveHighlight(_ delta: Int) {
-        guard !buttons.isEmpty else { return }
-        let next = ((highlightedIndex ?? -1) + delta + buttons.count) % buttons.count
-        if let i = highlightedIndex { buttons[i].pointerExited() }
+        guard buttons.contains(where: { $0.isEnabled }) else { return }
+        var next = highlightedIndex ?? (delta > 0 ? -1 : buttons.count)
+        repeat {
+            next = (next + delta + buttons.count) % buttons.count
+        } while !buttons[next].isEnabled
+        if let i = highlightedIndex, i != next { buttons[i].pointerExited() }
         highlightedIndex = next
         buttons[next].pointerEntered()
     }
@@ -639,34 +775,62 @@ final class PopupMenuView: UIView, PointerTarget {
 
 // MARK: - Toast
 
-/// A transient message shown near the top of the desktop ("Copied", JavaScript alerts, …).
+/// A notification-style card ("Copied", JavaScript alerts, zoom level…). The desktop stacks
+/// these in the top-right corner and slides them in from the right.
 final class ToastView: UIView {
     private let label = UILabel()
-    private let blur = UIVisualEffectView(effect: UIBlurEffect(style: .systemThickMaterialDark))
+    private let iconView = UIImageView()
+    private let material = Theme.materialView(.menu, cornerRadius: Theme.Radius.toast)
+    private let hasIcon: Bool
 
-    init(text: String) {
+    private static let maxWidth: CGFloat = 360
+    private static let padding = UIEdgeInsets(top: Theme.Space.m, left: Theme.Space.l, bottom: Theme.Space.m, right: Theme.Space.l)
+    private static let iconSize: CGFloat = 18
+
+    convenience init(text: String) {
+        self.init(text: text, symbol: nil)
+    }
+
+    init(text: String, symbol: String?) {
+        hasIcon = symbol != nil
         super.init(frame: .zero)
-        addSubview(blur)
-        blur.contentView.addSubview(label)
-        layer.cornerRadius = 12
-        clipsToBounds = true
-        blur.layer.cornerRadius = 12
+        addSubview(material)
+        material.contentView.addSubview(iconView)
+        material.contentView.addSubview(label)
+        layer.cornerRadius = Theme.Radius.toast
+        layer.cornerCurve = .continuous
+        material.layer.borderWidth = Theme.Size.hairline
+        material.layer.borderColor = Theme.border.cgColor
         label.text = text
         label.textColor = Theme.text
-        label.font = Theme.font(13, weight: .medium)
+        label.font = Theme.font(Theme.Text.body, weight: .medium)
         label.numberOfLines = 3
-        label.textAlignment = .center
-        let size = label.sizeThatFits(CGSize(width: 480, height: 200))
-        frame = CGRect(x: 0, y: 0, width: size.width + 36, height: size.height + 22)
-        applyPanelShadow(radius: 14, opacity: 0.4)
-        layer.masksToBounds = false
+        label.textAlignment = .left
+        if let symbol {
+            iconView.image = UIImage.symbol(symbol, size: Self.iconSize, weight: .medium)
+            iconView.tintColor = Theme.accentText
+            iconView.contentMode = .center
+        }
+        let iconSpace: CGFloat = hasIcon ? Self.iconSize + Theme.Space.m : 0
+        let textMax = Self.maxWidth - Self.padding.left - Self.padding.right - iconSpace
+        let size = label.sizeThatFits(CGSize(width: textMax, height: 200))
+        frame = CGRect(x: 0, y: 0,
+                       width: ceil(size.width) + Self.padding.left + Self.padding.right + iconSpace,
+                       height: max(ceil(size.height) + Self.padding.top + Self.padding.bottom, Theme.Size.listRow))
+        applyShadow(.menu)
     }
 
     required init?(coder: NSCoder) { fatalError() }
 
     override func layoutSubviews() {
         super.layoutSubviews()
-        blur.frame = bounds
-        label.frame = bounds.insetBy(dx: 18, dy: 11)
+        material.frame = bounds
+        var x = Self.padding.left
+        if hasIcon {
+            iconView.frame = CGRect(x: x, y: 0, width: Self.iconSize, height: bounds.height)
+            x += Self.iconSize + Theme.Space.m
+        }
+        label.frame = CGRect(x: x, y: Self.padding.top, width: bounds.width - x - Self.padding.right, height: bounds.height - Self.padding.top - Self.padding.bottom)
+        layer.shadowPath = UIBezierPath(roundedRect: bounds, cornerRadius: Theme.Radius.toast).cgPath
     }
 }

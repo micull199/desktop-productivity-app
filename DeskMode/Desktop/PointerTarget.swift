@@ -11,12 +11,15 @@ protocol PointerTarget: AnyObject {
     func pointerEntered()
     func pointerExited()
     func cursorStyle(at local: CGPoint) -> CursorStyle
+    /// Text shown in a tooltip once the cursor has rested on the target for a moment. `nil` for none.
+    var tooltipText: String? { get }
 }
 
 extension PointerTarget {
     func pointerEntered() {}
     func pointerExited() {}
     func cursorStyle(at local: CGPoint) -> CursorStyle { .arrow }
+    var tooltipText: String? { nil }
 }
 
 /// Something that can receive keyboard events.

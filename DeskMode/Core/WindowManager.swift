@@ -19,6 +19,11 @@ final class WindowManager {
 
     private var cascadeIndex = 0
 
+    /// Margin between tiled windows and the edges of the work area, and between tiles.
+    static let tileGap: CGFloat = Theme.Space.s
+    private static let cascadeInset: CGFloat = Theme.Space.m
+    private static let cascadeStep: CGFloat = 28
+
     init(container: UIView) {
         self.container = container
     }
@@ -110,28 +115,31 @@ final class WindowManager {
 
     // MARK: - Tiling
 
-    func tile(_ window: DesktopWindowView, _ tile: Tile) {
-        let area = workArea.insetBy(dx: 8, dy: 8)
-        let gap: CGFloat = 8
-        let target: CGRect
+    /// The frame a tile occupies, shared with the desktop's snap preview.
+    func frame(for tile: Tile, of window: DesktopWindowView? = nil) -> CGRect {
+        let gap = Self.tileGap
+        let area = workArea.insetBy(dx: gap, dy: gap)
         switch tile {
         case .left:
-            target = CGRect(x: area.minX, y: area.minY, width: (area.width - gap) / 2, height: area.height)
+            return CGRect(x: area.minX, y: area.minY, width: (area.width - gap) / 2, height: area.height)
         case .right:
-            target = CGRect(x: area.midX + gap / 2, y: area.minY, width: (area.width - gap) / 2, height: area.height)
+            return CGRect(x: area.midX + gap / 2, y: area.minY, width: (area.width - gap) / 2, height: area.height)
         case .full:
-            target = area
+            return area
         case .centered:
-            let size = window.app.defaultSize
-            target = CGRect(x: area.midX - size.width / 2, y: area.midY - size.height / 2,
-                            width: min(size.width, area.width), height: min(size.height, area.height))
+            let size = window?.app.defaultSize ?? CGSize(width: area.width * 0.6, height: area.height * 0.7)
+            return CGRect(x: area.midX - size.width / 2, y: area.midY - size.height / 2,
+                          width: min(size.width, area.width), height: min(size.height, area.height))
         }
-        window.animate(to: target)
+    }
+
+    func tile(_ window: DesktopWindowView, _ tile: Tile) {
+        window.animate(to: frame(for: tile, of: window))
     }
 
     /// Toggles between the user's own frame and a zoomed (work-area) frame, like the green button.
     func zoom(_ window: DesktopWindowView) {
-        let area = workArea.insetBy(dx: 8, dy: 8)
+        let area = workArea.insetBy(dx: Self.tileGap, dy: Self.tileGap)
         if let saved = window.frameBeforeZoom, window.frame.size == area.size {
             window.frameBeforeZoom = nil
             window.animate(to: saved)
@@ -147,10 +155,10 @@ final class WindowManager {
         // Before the first layout the work area is empty; place the window at its natural size
         // and let `relayout()` put it somewhere sensible once the area is known.
         guard workArea.width > 200, workArea.height > 200 else { return CGRect(origin: .zero, size: size) }
-        let area = workArea.insetBy(dx: 12, dy: 12)
+        let area = workArea.insetBy(dx: Self.cascadeInset, dy: Self.cascadeInset)
         let w = min(size.width, area.width)
         let h = min(size.height, area.height)
-        let step: CGFloat = 28
+        let step = Self.cascadeStep
         let maxSteps = Int(max(1, min((area.width - w) / step, (area.height - h) / step)))
         let i = CGFloat(cascadeIndex % max(maxSteps, 1))
         cascadeIndex += 1
