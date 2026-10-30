@@ -9,7 +9,7 @@ final class DeskTextView: UIView, PointerTarget, Focusable {
 
     var text: String {
         get { textView.text ?? "" }
-        set { textView.text = newValue; caretOffset = min(caretOffset, newValue.count); selection = nil; updateCaret(); onChange?(newValue) }
+        set { textView.text = newValue; caretOffset = min(caretOffset, (newValue as NSString).length); selection = nil; updateCaret(); onChange?(newValue) }
     }
     var onChange: ((String) -> Void)?
     var placeholder: String = "" { didSet { placeholderLabel.text = placeholder; updatePlaceholder() } }
@@ -91,7 +91,7 @@ final class DeskTextView: UIView, PointerTarget, Focusable {
 
     private func offset(at point: CGPoint) -> Int {
         let p = CGPoint(x: point.x + textView.contentOffset.x, y: point.y + textView.contentOffset.y)
-        guard let pos = textView.closestPosition(to: p) else { return text.count }
+        guard let pos = textView.closestPosition(to: p) else { return length }
         return textView.offset(from: textView.beginningOfDocument, to: pos)
     }
 
@@ -129,6 +129,16 @@ final class DeskTextView: UIView, PointerTarget, Focusable {
         }
     }
 
+    /// All offsets in this class are UTF-16 offsets, matching NSRange and UITextPosition.
+    private var length: Int { (text as NSString).length }
+    private var units: [unichar] { Array(text.utf16) }
+    private func isWordUnit(_ u: unichar) -> Bool {
+        guard let scalar = UnicodeScalar(u) else { return true }
+        return CharacterSet.alphanumerics.contains(scalar)
+    }
+    private let spaceUnit: unichar = 32
+    private let newlineUnit: unichar = 10
+
     private var selectedRange: NSRange? {
         guard let (a, b) = selection, a != b else { return nil }
         return NSRange(location: min(a, b), length: abs(a - b))
@@ -139,7 +149,7 @@ final class DeskTextView: UIView, PointerTarget, Focusable {
     private func replace(_ range: NSRange, with string: String) {
         let attributed = NSAttributedString(string: string, attributes: [.font: font, .foregroundColor: Theme.text])
         textView.textStorage.replaceCharacters(in: range, with: attributed)
-        caretOffset = range.location + string.count
+        caretOffset = range.location + (string as NSString).length
         selection = nil
         updateCaret()
         onChange?(text)
@@ -155,19 +165,26 @@ final class DeskTextView: UIView, PointerTarget, Focusable {
         guard caretOffset > 0 else { return }
         var len = 1
         if word {
-            let chars = Array(text)
+            let chars = units
             var i = caretOffset
-            while i > 0, chars[i - 1] == " " { i -= 1 }
-            while i > 0, chars[i - 1] != " ", chars[i - 1] != "\n" { i -= 1 }
+            while i > 0, chars[i - 1] == spaceUnit { i -= 1 }
+            while i > 0, chars[i - 1] != spaceUnit, chars[i - 1] != newlineUnit { i -= 1 }
             len = max(1, caretOffset - i)
+        } else if caretOffset >= 2, let pos = position(caretOffset), let prev = textView.position(from: pos, offset: -1) {
+            // Step over a whole grapheme (emoji, combined characters).
+            len = max(1, caretOffset - textView.offset(from: textView.beginningOfDocument, to: prev))
         }
         replace(NSRange(location: caretOffset - len, length: len), with: "")
     }
 
     private func deleteForward() {
         if let r = selectedRange { replace(r, with: ""); return }
-        guard caretOffset < text.count else { return }
-        replace(NSRange(location: caretOffset, length: 1), with: "")
+        guard caretOffset < length else { return }
+        var len = 1
+        if let pos = position(caretOffset), let next = textView.position(from: pos, offset: 1) {
+            len = max(1, textView.offset(from: textView.beginningOfDocument, to: next) - caretOffset)
+        }
+        replace(NSRange(location: caretOffset, length: len), with: "")
     }
 
     private func move(_ direction: UITextLayoutDirection, extend: Bool, byWord: Bool = false, toLineEdge: Bool = false) {
@@ -177,36 +194,36 @@ final class DeskTextView: UIView, PointerTarget, Focusable {
             if let pos = position(caretOffset), let r = textView.tokenizer.rangeEnclosingPosition(pos, with: .line, inDirection: UITextDirection.layout(direction)) {
                 target = textView.offset(from: textView.beginningOfDocument, to: direction == .left ? r.start : r.end)
             } else {
-                target = direction == .left ? 0 : text.count
+                target = direction == .left ? 0 : length
             }
         } else if byWord {
-            let chars = Array(text)
+            let chars = units
             var i = caretOffset
             if direction == .left {
-                while i > 0, !chars[i - 1].isLetter, !chars[i - 1].isNumber { i -= 1 }
-                while i > 0, chars[i - 1].isLetter || chars[i - 1].isNumber { i -= 1 }
+                while i > 0, !isWordUnit(chars[i - 1]) { i -= 1 }
+                while i > 0, isWordUnit(chars[i - 1]) { i -= 1 }
             } else {
-                while i < chars.count, !chars[i].isLetter, !chars[i].isNumber { i += 1 }
-                while i < chars.count, chars[i].isLetter || chars[i].isNumber { i += 1 }
+                while i < chars.count, !isWordUnit(chars[i]) { i += 1 }
+                while i < chars.count, isWordUnit(chars[i]) { i += 1 }
             }
             target = i
         } else if let pos = position(caretOffset), let next = textView.position(from: pos, in: direction, offset: 1) {
             target = textView.offset(from: textView.beginningOfDocument, to: next)
         } else {
-            target = direction == .left || direction == .up ? 0 : text.count
+            target = direction == .left || direction == .up ? 0 : length
         }
         if !extend, let r = selectedRange {
             // Collapse the selection toward the direction of travel.
             target = (direction == .left || direction == .up) ? r.location : r.location + r.length
         }
-        caretOffset = max(0, min(text.count, target))
+        caretOffset = max(0, min(length, target))
         selection = extend ? (anchor, caretOffset) : nil
         updateCaret()
     }
 
     func selectAll() {
-        selection = (0, text.count)
-        caretOffset = text.count
+        selection = (0, length)
+        caretOffset = length
         updateCaret()
     }
 
@@ -245,20 +262,20 @@ final class DeskTextView: UIView, PointerTarget, Focusable {
     }
 
     private func selectWord(at off: Int) {
-        let chars = Array(text)
+        let chars = units
         guard !chars.isEmpty else { return }
         var a = min(off, chars.count), b = a
-        while a > 0, chars[a - 1].isLetter || chars[a - 1].isNumber { a -= 1 }
-        while b < chars.count, chars[b].isLetter || chars[b].isNumber { b += 1 }
+        while a > 0, isWordUnit(chars[a - 1]) { a -= 1 }
+        while b < chars.count, isWordUnit(chars[b]) { b += 1 }
         selection = (a, b)
         caretOffset = b
     }
 
     private func selectLine(at off: Int) {
-        let chars = Array(text)
+        let chars = units
         var a = min(off, chars.count), b = a
-        while a > 0, chars[a - 1] != "\n" { a -= 1 }
-        while b < chars.count, chars[b] != "\n" { b += 1 }
+        while a > 0, chars[a - 1] != newlineUnit { a -= 1 }
+        while b < chars.count, chars[b] != newlineUnit { b += 1 }
         selection = (a, b)
         caretOffset = b
     }
@@ -287,11 +304,11 @@ final class DeskTextView: UIView, PointerTarget, Focusable {
             case .keyboardLeftArrow: move(.left, extend: event.shift, toLineEdge: true); return true
             case .keyboardRightArrow: move(.right, extend: event.shift, toLineEdge: true); return true
             case .keyboardUpArrow: caretOffset = 0; selection = event.shift ? (selection?.0 ?? caretOffset, 0) : nil; updateCaret(); return true
-            case .keyboardDownArrow: caretOffset = text.count; selection = nil; updateCaret(); return true
+            case .keyboardDownArrow: caretOffset = length; selection = nil; updateCaret(); return true
             case .keyboardDeleteOrBackspace:
                 // ⌘⌫ deletes to the start of the line.
-                let chars = Array(text); var i = caretOffset
-                while i > 0, chars[i - 1] != "\n" { i -= 1 }
+                let chars = units; var i = caretOffset
+                while i > 0, chars[i - 1] != newlineUnit { i -= 1 }
                 replace(NSRange(location: i, length: caretOffset - i), with: "")
                 return true
             default: return false

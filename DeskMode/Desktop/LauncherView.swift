@@ -16,7 +16,7 @@ final class LauncherView: UIView, PointerTarget {
             }
         }
 
-        var subtitle: String {
+        @MainActor var subtitle: String {
             switch self {
             case .app: return "Application"
             case .search: return Settings.shared.searchEngine.title
@@ -172,7 +172,7 @@ enum URLGuess {
     }
 
     /// Resolves address-bar input to a URL, falling back to the configured search engine.
-    static func resolve(_ text: String) -> URL {
+    @MainActor static func resolve(_ text: String) -> URL {
         url(from: text) ?? Settings.shared.searchEngine.searchURL(for: text)
     }
 }

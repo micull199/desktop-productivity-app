@@ -16,7 +16,7 @@ final class DesktopViewController: UIViewController, InputSink {
     private let windowContainer = UIView()
     private let menuBar = MenuBarView()
     private let dock = DockView()
-    private let overlay = UIView()          // popups, launcher, toasts
+    private let overlay = PassThroughView() // popups, launcher, toasts
     private let snapPreview = UIView()
     private let touchCapture = TouchCaptureView()
     private let cursorView = CursorView()
@@ -562,6 +562,14 @@ final class DesktopViewController: UIViewController, InputSink {
             }
         }
         return nil
+    }
+}
+
+/// A container that only hit-tests its subviews, never itself.
+final class PassThroughView: UIView {
+    override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+        let hit = super.hitTest(point, with: event)
+        return hit === self ? nil : hit
     }
 }
 
