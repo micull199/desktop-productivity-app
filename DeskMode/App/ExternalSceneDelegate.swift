@@ -6,6 +6,8 @@ final class ExternalSceneDelegate: UIResponder, UIWindowSceneDelegate {
     var window: UIWindow?
     private var desktop: DesktopViewController?
     private var host: ScaledHostViewController?
+    /// iOS sometimes reverts the display to its native mode a few seconds after connecting.
+    private var modeRetries = 0
 
     func scene(_ scene: UIScene, willConnectTo session: UISceneSession, options connectionOptions: UIScene.ConnectionOptions) {
         guard let windowScene = scene as? UIWindowScene else { return }
@@ -35,6 +37,10 @@ final class ExternalSceneDelegate: UIResponder, UIWindowSceneDelegate {
         let size = windowScene.coordinateSpace.bounds.size
         guard size != previousCoordinateSpace.bounds.size else { return }
         DesktopSession.shared.externalDisplayDidResize(size: size, scale: windowScene.screen.scale)
+        if size.width > 2048, modeRetries < 2 {
+            modeRetries += 1
+            Self.applyPreferredMode(to: windowScene.screen)
+        }
     }
 
     func sceneDidDisconnect(_ scene: UIScene) {
