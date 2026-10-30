@@ -211,7 +211,7 @@ final class BrowserWindowContent: UIView, WindowContent {
         backButton.isEnabled = tab.canGoBack
         forwardButton.isEnabled = tab.canGoForward
         reloadButton.symbolName = tab.isLoading ? "xmark" : "arrow.clockwise"
-        if !omnibox.isFocused { omnibox.replaceAll(with: tab.displayURL) }
+        if !omnibox.hasFocus { omnibox.replaceAll(with: tab.displayURL) }
         progressBar.isHidden = !tab.isLoading || tab.progress >= 1
         onTitleChange?(windowTitle)
         setNeedsLayout()

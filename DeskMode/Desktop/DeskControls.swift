@@ -284,7 +284,7 @@ final class DeskTextField: UIView, PointerTarget, Focusable {
 
     weak var focusGroup: FocusGroup?
 
-    private(set) var isFocused = false
+    private(set) var hasFocus = false
     private(set) var caretIndex = 0
     private var isAllSelected = false
 
@@ -361,22 +361,22 @@ final class DeskTextField: UIView, PointerTarget, Focusable {
         placeholderLabel.frame = CGRect(x: textAlignment == .center ? 0 : 0, y: 0, width: clip.bounds.width, height: bounds.height)
         placeholderLabel.textAlignment = textAlignment
         selectionView.frame = CGRect(x: -scrollOffset - 1, y: 6, width: textWidth + 2, height: bounds.height - 12)
-        selectionView.isHidden = !(isAllSelected && isFocused && !text.isEmpty)
+        selectionView.isHidden = !(isAllSelected && hasFocus && !text.isEmpty)
         caret.frame = CGRect(x: caretX - scrollOffset, y: 7, width: 1.5, height: bounds.height - 14)
     }
 
     private func refresh() {
         background.isHidden = !showsBackground
-        background.backgroundColor = isFocused ? UIColor(white: 1, alpha: 0.1) : Theme.controlBackground
-        background.layer.borderColor = isFocused ? Theme.accent.withAlphaComponent(0.9).cgColor : UIColor(white: 1, alpha: 0.1).cgColor
+        background.backgroundColor = hasFocus ? UIColor(white: 1, alpha: 0.1) : Theme.controlBackground
+        background.layer.borderColor = hasFocus ? Theme.accent.withAlphaComponent(0.9).cgColor : UIColor(white: 1, alpha: 0.1).cgColor
         setNeedsLayout()
     }
 
     // MARK: Focus
 
     func setFocused(_ focused: Bool) {
-        guard isFocused != focused else { return }
-        isFocused = focused
+        guard hasFocus != focused else { return }
+        hasFocus = focused
         if focused {
             if selectsAllOnFocus, !text.isEmpty { isAllSelected = true }
             caretIndex = text.count
@@ -408,7 +408,7 @@ final class DeskTextField: UIView, PointerTarget, Focusable {
     }
 
     private func resetBlink() {
-        if isFocused { startBlink() }
+        if hasFocus { startBlink() }
     }
 
     // MARK: Pointer
@@ -416,7 +416,7 @@ final class DeskTextField: UIView, PointerTarget, Focusable {
     func pointer(_ event: PointerEvent, local: CGPoint) {
         switch event.kind {
         case .down(.left):
-            let wasFocused = isFocused
+            let wasFocused = hasFocus
             requestFocus()
             if wasFocused {
                 if event.clickCount >= 2 { selectAll() } else { isAllSelected = false; caretIndex = index(at: local) }

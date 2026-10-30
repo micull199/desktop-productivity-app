@@ -16,7 +16,7 @@ final class DeskTextView: UIView, PointerTarget, Focusable {
     var font: UIFont = Theme.font(15) { didSet { textView.font = font; placeholderLabel.font = font } }
 
     weak var focusGroup: FocusGroup?
-    private(set) var isFocused = false
+    private(set) var hasFocus = false
 
     private let textView = UITextView()
     private let caret = UIView()
@@ -65,7 +65,7 @@ final class DeskTextView: UIView, PointerTarget, Focusable {
     // MARK: Focus
 
     func setFocused(_ focused: Bool) {
-        isFocused = focused
+        hasFocus = focused
         if focused { startBlink() } else { stopBlink(); selection = nil }
     }
 
@@ -101,7 +101,7 @@ final class DeskTextView: UIView, PointerTarget, Focusable {
         var r = textView.caretRect(for: pos)
         if r.isNull || r.isInfinite { r = CGRect(x: textView.textContainerInset.left + 5, y: textView.textContainerInset.top, width: 2, height: font.lineHeight) }
         caret.frame = CGRect(x: r.minX, y: r.minY, width: 2, height: max(r.height, font.lineHeight))
-        if isFocused { startBlink() }
+        if hasFocus { startBlink() }
         scrollCaretIntoView()
     }
 

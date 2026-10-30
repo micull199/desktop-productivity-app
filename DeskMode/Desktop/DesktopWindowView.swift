@@ -36,7 +36,7 @@ final class DesktopWindowView: UIView, PointerTarget {
     var app: DeskApp { content.app }
     var isMinimized = false
     var frameBeforeZoom: CGRect?
-    private(set) var isFocused = false
+    private(set) var hasFocus = false
 
     /// Called while dragging near a screen edge so the desktop can show a snap preview.
     var onSnapPreview: ((WindowManager.Tile?) -> Void)?
@@ -149,7 +149,7 @@ final class DesktopWindowView: UIView, PointerTarget {
     // MARK: - Focus
 
     func setFocused(_ focused: Bool) {
-        isFocused = focused
+        hasFocus = focused
         titleBar.backgroundColor = focused ? Theme.titleBarBackground : Theme.titleBarBackgroundInactive
         titleLabel.textColor = focused ? Theme.text : Theme.secondaryText
         layer.shadowOpacity = focused ? 0.55 : 0.3
