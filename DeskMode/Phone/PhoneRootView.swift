@@ -32,6 +32,7 @@ private struct SetupView: View {
             VStack(alignment: .leading, spacing: 22) {
                 header
                 statusCards
+                displayLog
                 steps
                 Button {
                     session.beginPhonePreview()
@@ -77,12 +78,38 @@ private struct SetupView: View {
     private var statusCards: some View {
         VStack(spacing: 10) {
             StatusCard(symbol: "display", title: "Display", detail: session.displayDescription, ok: session.displayState.isConnected,
-                       hint: "Connect with USB-C to a monitor (DisplayPort) or an HDMI adapter.")
+                       hint: "Keep DeskMode open, then connect USB-C to a monitor (DisplayPort) or an HDMI adapter.")
             StatusCard(symbol: "keyboard", title: "Keyboard", detail: input.keyboardConnected ? "Connected" : "Not detected", ok: input.keyboardConnected,
                        hint: "Pair in Settings › Bluetooth, or plug in over USB-C.")
             StatusCard(symbol: "computermouse", title: "Mouse", detail: input.mouseConnected ? "Connected" : "Not detected", ok: input.mouseConnected,
                        hint: "Pair in Settings › Bluetooth. Without a mouse the iPhone screen works as a trackpad.")
         }
+    }
+
+    private var displayLog: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text("Display log").font(.headline)
+                Spacer()
+                Button("Check now") { ExternalDisplayMonitor.shared.recheck(reason: "manual check") }
+                    .font(.caption)
+            }
+            .padding(.bottom, 2)
+            if session.diagnostics.isEmpty {
+                Text("No display events yet. Connect the monitor while DeskMode is open and events will appear here.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(Array(session.diagnostics.enumerated()), id: \.offset) { _, line in
+                    Text(line)
+                        .font(.system(.caption2, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                }
+            }
+        }
+        .padding(16)
+        .background(RoundedRectangle(cornerRadius: 16).fill(Color.white.opacity(0.06)))
     }
 
     private var steps: some View {

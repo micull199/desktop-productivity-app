@@ -14,6 +14,7 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
                      didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
         UIDevice.current.isBatteryMonitoringEnabled = true
         InputRouter.shared.start()
+        ExternalDisplayMonitor.shared.start()
         return true
     }
 
@@ -22,8 +23,10 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
     func application(_ application: UIApplication,
                      configurationForConnecting connectingSceneSession: UISceneSession,
                      options: UIScene.ConnectionOptions) -> UISceneConfiguration {
+        DesktopSession.shared.log("Scene requested: \(connectingSceneSession.role.rawValue)")
         switch connectingSceneSession.role {
-        case .windowExternalDisplayNonInteractive:
+        // `.windowExternalDisplay` is the pre-iOS 16 role; accept it too in case the system uses it.
+        case .windowExternalDisplayNonInteractive, .windowExternalDisplay:
             let config = UISceneConfiguration(name: "Desktop", sessionRole: connectingSceneSession.role)
             config.delegateClass = ExternalSceneDelegate.self
             return config

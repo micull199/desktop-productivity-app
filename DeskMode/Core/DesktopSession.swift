@@ -1,5 +1,6 @@
 import UIKit
 import Combine
+import os
 
 /// App-wide state shared by the phone scene and the external-display scene.
 @MainActor
@@ -23,11 +24,19 @@ final class DesktopSession: ObservableObject {
     /// True while the desktop is being previewed on the phone screen itself (no monitor needed).
     @Published private(set) var previewingOnPhone = false
     @Published private(set) var openWindowCount = 0
+    /// Recent display-related events, newest last, shown on the phone so connection problems are visible.
+    @Published private(set) var diagnostics: [String] = []
 
     private(set) weak var phoneScene: UIWindowScene?
     private(set) weak var desktop: DesktopViewController?
     private var savedBrightness: CGFloat?
     private var cancellables = Set<AnyCancellable>()
+    private let logger = Logger(subsystem: "com.micull.DeskMode", category: "display")
+    private static let timeFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "HH:mm:ss"
+        return f
+    }()
 
     let settings = Settings.shared
     let input = InputRouter.shared
@@ -66,15 +75,23 @@ final class DesktopSession: ObservableObject {
     // MARK: - External display
 
     func externalDisplayDidConnect(_ scene: UIWindowScene, desktop: DesktopViewController) {
-        self.desktop = desktop
+        ExternalDisplayMonitor.shared.sceneTookOver()
         let size = scene.coordinateSpace.bounds.size
-        displayState = .connected(size: size, scale: scene.screen.scale)
+        log("Desktop scene connected: \(Int(size.width * scene.screen.scale))×\(Int(size.height * scene.screen.scale))")
+        externalDisplayDidConnect(size: size, scale: scene.screen.scale, desktop: desktop)
+    }
+
+    /// Shared by the scene path and the legacy `UIScreen` fallback in `ExternalDisplayMonitor`.
+    func externalDisplayDidConnect(size: CGSize, scale: CGFloat, desktop: DesktopViewController) {
+        self.desktop = desktop
+        displayState = .connected(size: size, scale: scale)
         UIApplication.shared.isIdleTimerDisabled = true
         if settings.dimPhoneWhenConnected { dimPhoneScreen() }
         desktop.onWindowCountChange = { [weak self] count in self?.openWindowCount = count }
     }
 
     func externalDisplayDidDisconnect() {
+        log("Desktop disconnected")
         desktop = nil
         displayState = .disconnected
         openWindowCount = 0
@@ -113,6 +130,14 @@ final class DesktopSession: ObservableObject {
         guard let saved = savedBrightness, let screen = phoneScene?.screen else { return }
         screen.brightness = saved
         savedBrightness = nil
+    }
+
+    // MARK: - Diagnostics
+
+    func log(_ message: String) {
+        logger.info("\(message, privacy: .public)")
+        diagnostics.append("\(Self.timeFormatter.string(from: Date()))  \(message)")
+        if diagnostics.count > 14 { diagnostics.removeFirst(diagnostics.count - 14) }
     }
 
     // MARK: - Convenience for the phone UI

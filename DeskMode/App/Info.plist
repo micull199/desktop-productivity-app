@@ -59,6 +59,15 @@
 			<!-- The external monitor: the desktop environment. Non-interactive means the
 			     display has no touch input, so DeskMode draws its own cursor and routes
 			     mouse / keyboard events itself. -->
+			<key>UIWindowSceneSessionRoleExternalDisplay</key>
+			<array>
+				<dict>
+					<key>UISceneConfigurationName</key>
+					<string>Desktop</string>
+					<key>UISceneDelegateClassName</key>
+					<string>$(PRODUCT_MODULE_NAME).ExternalSceneDelegate</string>
+				</dict>
+			</array>
 			<key>UIWindowSceneSessionRoleExternalDisplayNonInteractive</key>
 			<array>
 				<dict>
