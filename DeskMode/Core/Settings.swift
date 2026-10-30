@@ -46,6 +46,8 @@ final class Settings: ObservableObject {
     @Published var wallpaper: Wallpaper { didSet { save() } }
     @Published var showClockSeconds: Bool { didSet { save() } }
     @Published var trackpadSensitivity: CGFloat { didSet { save() } }
+    /// Present the browser as Google Chrome on a Mac instead of Safari (user agent + client hints).
+    @Published var identifyAsChrome: Bool { didSet { save() } }
 
     private let defaults = UserDefaults.standard
     private var loading = true
@@ -63,6 +65,7 @@ final class Settings: ObservableObject {
         wallpaper = Wallpaper(rawValue: d.string(forKey: "wallpaper") ?? "") ?? .sonoma
         showClockSeconds = d.object(forKey: "showClockSeconds") as? Bool ?? false
         trackpadSensitivity = d.object(forKey: "trackpadSensitivity") as? CGFloat ?? 2.2
+        identifyAsChrome = d.object(forKey: "identifyAsChrome") as? Bool ?? false
         loading = false
     }
 
@@ -79,6 +82,7 @@ final class Settings: ObservableObject {
         defaults.set(wallpaper.rawValue, forKey: "wallpaper")
         defaults.set(showClockSeconds, forKey: "showClockSeconds")
         defaults.set(trackpadSensitivity, forKey: "trackpadSensitivity")
+        defaults.set(identifyAsChrome, forKey: "identifyAsChrome")
     }
 
     func resetToDefaults() {
@@ -93,5 +97,6 @@ final class Settings: ObservableObject {
         wallpaper = .sonoma
         showClockSeconds = false
         trackpadSensitivity = 2.2
+        identifyAsChrome = false
     }
 }

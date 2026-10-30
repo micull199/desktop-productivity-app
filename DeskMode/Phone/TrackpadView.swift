@@ -15,6 +15,8 @@ final class TrackpadUIView: UIView {
     private var dragging = false
     private var dragTimer: Timer?
     private var holdTimer: Timer?
+    /// Light tick on tap-click and right-click; cursor movement stays silent.
+    private let clickFeedback = UIImpactFeedbackGenerator(style: .light)
     /// Fired when a single finger rests without moving for a moment (used to wake the screen).
     var onLongHold: (() -> Void)?
 
@@ -29,6 +31,7 @@ final class TrackpadUIView: UIView {
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
         let all = event?.touches(for: self) ?? touches
         if all.count == touches.count {
+            clickFeedback.prepare()
             touchStart = Date().timeIntervalSinceReferenceDate
             moved = false
             maxTouches = 0
@@ -95,6 +98,7 @@ final class TrackpadUIView: UIView {
             return
         }
         if !moved, duration < 0.3 {
+            clickFeedback.impactOccurred()
             if maxTouches >= 2 {
                 input.click(.right)
             } else {
