@@ -138,6 +138,23 @@ final class DesktopSession: ObservableObject {
         logger.info("\(message, privacy: .public)")
         diagnostics.append("\(Self.timeFormatter.string(from: Date()))  \(message)")
         if diagnostics.count > 14 { diagnostics.removeFirst(diagnostics.count - 14) }
+        Self.appendToLogFile("\(Date())  \(message)")
+    }
+
+    /// Documents/display-log.txt, so the log can be pulled off the device with
+    /// `devicectl device copy from --domain-type appDataContainer`.
+    static let logFileURL: URL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        .appendingPathComponent("display-log.txt")
+
+    private static func appendToLogFile(_ line: String) {
+        let data = Data((line + "\n").utf8)
+        if let handle = try? FileHandle(forWritingTo: logFileURL) {
+            defer { try? handle.close() }
+            _ = try? handle.seekToEnd()
+            try? handle.write(contentsOf: data)
+        } else {
+            try? data.write(to: logFileURL)
+        }
     }
 
     // MARK: - Convenience for the phone UI
