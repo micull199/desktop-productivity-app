@@ -1,0 +1,201 @@
+import UIKit
+import WebKit
+
+/// One tab: a web view plus observable navigation state.
+@MainActor
+final class BrowserTab: NSObject {
+
+    static let desktopUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Safari/605.1.15"
+
+    let id = UUID()
+    let webView: WKWebView
+    let contentView: WebContentView
+
+    private(set) var title: String = "New Tab"
+    private(set) var url: URL?
+    private(set) var isLoading = false
+    private(set) var progress: Double = 0
+    private(set) var canGoBack = false
+    private(set) var canGoForward = false
+    private(set) var isStartPage = true
+
+    var onChange: (() -> Void)?
+    var onOpenNewTab: ((URL?, WKWebViewConfiguration?) -> WKWebView?)?
+    var onAlert: ((String) -> Void)?
+
+    private var observers: [NSKeyValueObservation] = []
+
+    static func makeConfiguration(base: WKWebViewConfiguration? = nil) -> WKWebViewConfiguration {
+        let config = base ?? WKWebViewConfiguration()
+        config.allowsInlineMediaPlayback = true
+        config.mediaTypesRequiringUserActionForPlayback = []
+        config.preferences.isElementFullscreenEnabled = true
+        config.preferences.javaScriptCanOpenWindowsAutomatically = true
+        config.defaultWebpagePreferences.preferredContentMode = Settings.shared.desktopWebsites ? .desktop : .recommended
+        config.defaultWebpagePreferences.allowsContentJavaScript = true
+        let controller = config.userContentController
+        controller.removeAllUserScripts()
+        controller.addUserScript(WKUserScript(source: BrowserScripts.bridge, injectionTime: .atDocumentStart, forMainFrameOnly: true))
+        controller.addUserScript(WKUserScript(source: BrowserScripts.style, injectionTime: .atDocumentEnd, forMainFrameOnly: true))
+        return config
+    }
+
+    init(configuration: WKWebViewConfiguration? = nil) {
+        let config = BrowserTab.makeConfiguration(base: configuration)
+        webView = WKWebView(frame: .zero, configuration: config)
+        contentView = WebContentView(webView: webView)
+        super.init()
+        if Settings.shared.desktopWebsites { webView.customUserAgent = BrowserTab.desktopUserAgent }
+        webView.allowsBackForwardNavigationGestures = false
+        webView.allowsLinkPreview = false
+        webView.navigationDelegate = self
+        webView.uiDelegate = self
+        if #available(iOS 16.4, *) { webView.isInspectable = true }
+
+        observers = [
+            webView.observe(\.title, options: [.new]) { [weak self] wv, _ in
+                MainActor.assumeIsolated { self?.updateTitle(wv.title) }
+            },
+            webView.observe(\.url, options: [.new]) { [weak self] wv, _ in
+                MainActor.assumeIsolated { self?.url = wv.url; self?.onChange?() }
+            },
+            webView.observe(\.estimatedProgress, options: [.new]) { [weak self] wv, _ in
+                MainActor.assumeIsolated { self?.progress = wv.estimatedProgress; self?.onChange?() }
+            },
+            webView.observe(\.isLoading, options: [.new]) { [weak self] wv, _ in
+                MainActor.assumeIsolated { self?.isLoading = wv.isLoading; self?.onChange?() }
+            },
+            webView.observe(\.canGoBack, options: [.new]) { [weak self] wv, _ in
+                MainActor.assumeIsolated { self?.canGoBack = wv.canGoBack; self?.onChange?() }
+            },
+            webView.observe(\.canGoForward, options: [.new]) { [weak self] wv, _ in
+                MainActor.assumeIsolated { self?.canGoForward = wv.canGoForward; self?.onChange?() }
+            }
+        ]
+    }
+
+    private func updateTitle(_ t: String?) {
+        if isStartPage { title = "New Tab" }
+        else if let t, !t.isEmpty { title = t }
+        else if let host = url?.host { title = host }
+        onChange?()
+    }
+
+    // MARK: - Navigation
+
+    func load(_ url: URL) {
+        isStartPage = false
+        webView.load(URLRequest(url: url))
+        self.url = url
+        title = url.host ?? url.absoluteString
+        onChange?()
+    }
+
+    /// Used when WebKit itself performs the first load (popup windows).
+    func expectExternalLoad(_ url: URL?) {
+        isStartPage = false
+        self.url = url
+        title = url?.host ?? "Loading…"
+        onChange?()
+    }
+
+    func loadStartPage() {
+        isStartPage = true
+        title = "New Tab"
+        url = nil
+        webView.loadHTMLString(StartPage.html(), baseURL: URL(string: "about:start"))
+        onChange?()
+    }
+
+    func reload() {
+        if isStartPage { loadStartPage() } else { webView.reload() }
+    }
+
+    func stop() { webView.stopLoading() }
+    func goBack() { webView.goBack() }
+    func goForward() { webView.goForward() }
+
+    var displayURL: String {
+        guard !isStartPage, let url else { return "" }
+        return url.absoluteString
+    }
+
+    func find(_ text: String, backwards: Bool, completion: @escaping (Bool) -> Void) {
+        guard !text.isEmpty else { completion(false); return }
+        let config = WKFindConfiguration()
+        config.backwards = backwards
+        config.caseSensitive = false
+        config.wraps = true
+        webView.find(text, configuration: config) { result in
+            completion(result.matchFound)
+        }
+    }
+}
+
+// MARK: - WKNavigationDelegate
+
+extension BrowserTab: WKNavigationDelegate {
+
+    func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
+        let url = navigationAction.request.url
+        // Links that target a new window arrive with no target frame.
+        if navigationAction.targetFrame == nil, let url {
+            _ = onOpenNewTab?(url, nil)
+            decisionHandler(.cancel)
+            return
+        }
+        if let scheme = url?.scheme?.lowercased(), !["http", "https", "about", "data", "blob", "file"].contains(scheme) {
+            // Custom schemes (mailto:, tel:, app links) cannot be handled on the external display.
+            onAlert?("Links of type “\(scheme):” are not supported in DeskMode.")
+            decisionHandler(.cancel)
+            return
+        }
+        if navigationAction.navigationType != .other, !(url?.absoluteString.hasPrefix("about:") ?? false) {
+            isStartPage = false
+        }
+        decisionHandler(.allow)
+    }
+
+    func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
+        if let u = webView.url, u.scheme != "about" { isStartPage = false }
+        onChange?()
+    }
+
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        updateTitle(webView.title)
+    }
+
+    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+        let nsError = error as NSError
+        guard nsError.code != NSURLErrorCancelled else { return }
+        let failed = (nsError.userInfo[NSURLErrorFailingURLStringErrorKey] as? String) ?? url?.absoluteString ?? ""
+        webView.loadHTMLString(StartPage.errorHTML(message: error.localizedDescription, url: failed), baseURL: nil)
+    }
+
+}
+
+// MARK: - WKUIDelegate
+
+extension BrowserTab: WKUIDelegate {
+
+    func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration, for navigationAction: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
+        onOpenNewTab?(navigationAction.request.url, configuration)
+    }
+
+    func webViewDidClose(_ webView: WKWebView) {}
+
+    func webView(_ webView: WKWebView, runJavaScriptAlertPanelWithMessage message: String, initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping () -> Void) {
+        onAlert?(message)
+        completionHandler()
+    }
+
+    func webView(_ webView: WKWebView, runJavaScriptConfirmPanelWithMessage message: String, initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping (Bool) -> Void) {
+        onAlert?(message)
+        completionHandler(true)
+    }
+
+    func webView(_ webView: WKWebView, runJavaScriptTextInputPanelWithPrompt prompt: String, defaultText: String?, initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping (String?) -> Void) {
+        onAlert?(prompt)
+        completionHandler(defaultText)
+    }
+}
