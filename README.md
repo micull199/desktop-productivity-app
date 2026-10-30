@@ -9,7 +9,7 @@ as Safari on a Mac. The iPhone's own screen goes dark and stays unlocked while y
 
 | Area | Details |
 | --- | --- |
-| External display | Uses the `UIWindowSceneSessionRoleExternalDisplayNonInteractive` scene so the monitor shows the desktop (not a mirror) at native resolution. |
+| External display | Uses the `UIWindowSceneSessionRoleExternalDisplayNonInteractive` scene so the monitor shows the desktop (not a mirror) at native resolution. On iOS 27 and later the system only hands out that scene after the app registers a `UISceneAccessory`, which `PhoneRootViewController` does as soon as it is on screen; earlier releases connect it automatically from Info.plist. |
 | Mouse | Reads Bluetooth / USB mice through `GameController` (`GCMouse`) and draws its own cursor on the monitor. Hover, click, double/triple click, right‑click, middle‑click and scroll wheel all work. |
 | Keyboard | Hardware keyboard presses are captured on the phone scene and routed to the focused window. Mac‑style shortcuts throughout (⌘T, ⌘W, ⌘L, ⌘Space, ⌘\`, ⌘[ / ⌘], ⌘F, ⌘+/−…). |
 | Phone screen | Brightness goes to zero and the UI turns black; the idle timer is disabled so the phone never locks. Press and hold on the screen to wake it and show controls. |
@@ -98,6 +98,10 @@ so the desktop shows an I‑beam over text and a hand over links.
 
 ## Limitations
 
+* On iOS 27+ the desktop appears only while the DeskMode phone screen is showing, because the
+  external-display scene is tied to the scene-accessory registration made by that screen's
+  view controller. The phone's *Display log* card lists every display event iOS reported, and
+  the same log is written to `Documents/display-log.txt` inside the app container.
 * iOS does not allow an app to switch the display off. DeskMode sets brightness to zero and
   shows black, which is visually equivalent and keeps the session alive.
 * If a Bluetooth mouse is paired but the cursor does not move, enable *Settings › Accessibility ›

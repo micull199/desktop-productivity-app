@@ -9,6 +9,8 @@ final class PhoneRootViewController: UIViewController {
     private let session = DesktopSession.shared
     private var hosting: UIHostingController<PhoneRootView>!
     private var previewDesktop: DesktopViewController?
+    /// iOS 27 scene-accessory registration for the external display. Must stay alive.
+    private var sceneAccessoryRegistration: Any?
     private var cancellables = Set<AnyCancellable>()
 
     override var canBecomeFirstResponder: Bool { true }
@@ -44,6 +46,30 @@ final class PhoneRootViewController: UIViewController {
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
         becomeFirstResponder()
+        registerExternalDisplayAccessory()
+    }
+
+    // MARK: - External display (iOS 27+)
+
+    /// Up to iOS 26 the system connected the external-display scene automatically because
+    /// Info.plist declares it. From iOS 27 the app only receives that scene after a view
+    /// controller on screen registers a scene accessory for it; until then iOS just mirrors.
+    private func registerExternalDisplayAccessory() {
+        guard sceneAccessoryRegistration == nil else { return }
+        if #available(iOS 27.0, *) {
+            let config = UISceneConfiguration(name: "Desktop", sessionRole: .windowExternalDisplayNonInteractive)
+            config.delegateClass = ExternalSceneDelegate.self
+            let accessory = UISceneAccessory.externalNonInteractive(sceneConfiguration: config)
+            let registration = registerSceneAccessory(accessory)
+            sceneAccessoryRegistration = registration
+            ExternalDisplayMonitor.shared.accessoryStatus = { [weak registration] in
+                guard let registration else { return "released" }
+                return registration.isAvailable ? "available" : "not available"
+            }
+            session.log("Scene accessory registered for external display · available: \(registration.isAvailable)")
+        } else {
+            session.log("iOS 26 or earlier: external-display scene connects automatically")
+        }
     }
 
     // MARK: - Hardware keyboard

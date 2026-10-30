@@ -17,6 +17,8 @@ final class ExternalDisplayMonitor {
     private var fallbackDesktop: DesktopViewController?
     private var pendingFallback: DispatchWorkItem?
     private var started = false
+    /// Reports the iOS 27 scene-accessory registration state for the diagnostics log.
+    var accessoryStatus: (() -> String)?
 
     /// How long to give UIKit to deliver the external-display scene before taking over.
     private let gracePeriod: TimeInterval = 2.5
@@ -53,7 +55,7 @@ final class ExternalDisplayMonitor {
 
     @objc private func screenDidConnect(_ note: Notification) {
         guard let screen = note.object as? UIScreen else { return }
-        session.log("Screen connected: \(describe(screen)) · app \(appState)")
+        session.log("Screen connected: \(describe(screen)) · screens now \(UIScreen.screens.count) · app \(appState)")
         scheduleFallback(for: screen)
     }
 
@@ -75,12 +77,24 @@ final class ExternalDisplayMonitor {
     /// external display that has no desktop on it.
     func recheck(reason: String) {
         let externals = externalScreens()
+        let roles = UIApplication.shared.connectedScenes.map { shortRole($0.session.role) }.joined(separator: ",")
+        let sessions = UIApplication.shared.openSessions.map { shortRole($0.role) }.joined(separator: ",")
+        session.log("Check (\(reason)): screens \(UIScreen.screens.count) [\(describeScreens())] · scenes [\(roles)] · sessions [\(sessions)] · app \(appState) · multiScene \(UIApplication.shared.supportsMultipleScenes) · accessory \(accessoryStatus?() ?? "none")")
         guard let screen = externals.first else { return }
         if session.displayState.isConnected {
             return
         }
-        session.log("External screen present at \(reason): \(describe(screen)) · no desktop yet")
+        session.log("External screen present · no desktop yet · scheduling fallback")
         scheduleFallback(for: screen)
+    }
+
+    private func shortRole(_ role: UISceneSession.Role) -> String {
+        switch role {
+        case .windowApplication: return "app"
+        case .windowExternalDisplayNonInteractive: return "extNonInteractive"
+        case .windowExternalDisplay: return "extLegacy"
+        default: return role.rawValue
+        }
     }
 
     // MARK: - Fallback window

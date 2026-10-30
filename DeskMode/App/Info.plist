@@ -41,7 +41,8 @@
 	<string>Dark</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
-		<!-- Required so the system hands the app a second scene when a display is attached. -->
+		<!-- Required so the system hands the app a second scene when a display is attached.
+		     On iOS 27+ the app must additionally register a scene accessory (see AppDelegate). -->
 		<key>UIApplicationSupportsMultipleScenes</key>
 		<true/>
 		<key>UISceneConfigurations</key>
