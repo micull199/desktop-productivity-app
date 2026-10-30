@@ -6,19 +6,21 @@ final class ExternalSceneDelegate: UIResponder, UIWindowSceneDelegate {
     var window: UIWindow?
     private var desktop: DesktopViewController?
     private var host: ScaledHostViewController?
-    /// iOS sometimes reverts the display to its native mode a few seconds after connecting.
-    private var modeRetries = 0
 
     func scene(_ scene: UIScene, willConnectTo session: UISceneSession, options connectionOptions: UIScene.ConnectionOptions) {
         guard let windowScene = scene as? UIWindowScene else { return }
 
         // Use every pixel the display offers. Overscan compensation would shrink the desktop.
         windowScene.screen.overscanCompensation = .none
-        Self.applyPreferredMode(to: windowScene.screen)
+        // Run the monitor at its native mode; a 4K display gets a 2× desktop drawn at full pixel density.
+        _ = UIView.installDesktopContentScaleHook
+        let size = windowScene.coordinateSpace.bounds.size
+        DesktopSession.shared.log("Display native \(Int(size.width))×\(Int(size.height)) · desktop scale \(Int(ScaledHostViewController.scale(for: size)))×")
 
         let desktop = DesktopViewController()
         let host = ScaledHostViewController(child: desktop)
-        let window = UIWindow(windowScene: windowScene)
+        let window = DesktopWindow(windowScene: windowScene)
+        window.contentScale = ScaledHostViewController.scale(for: size)
         window.rootViewController = host
         window.backgroundColor = .black
         // Do not make this window *key*: hardware keyboard presses must keep flowing to the
@@ -37,10 +39,7 @@ final class ExternalSceneDelegate: UIResponder, UIWindowSceneDelegate {
         let size = windowScene.coordinateSpace.bounds.size
         guard size != previousCoordinateSpace.bounds.size else { return }
         DesktopSession.shared.externalDisplayDidResize(size: size, scale: windowScene.screen.scale)
-        if size.width > 2048, modeRetries < 2 {
-            modeRetries += 1
-            Self.applyPreferredMode(to: windowScene.screen)
-        }
+        (window as? DesktopWindow)?.contentScale = ScaledHostViewController.scale(for: size)
     }
 
     func sceneDidDisconnect(_ scene: UIScene) {
@@ -51,26 +50,6 @@ final class ExternalSceneDelegate: UIResponder, UIWindowSceneDelegate {
         DesktopSession.shared.externalDisplayDidDisconnect()
     }
 
-    // MARK: - Display mode
-
-    /// A 4K monitor at 1× makes the desktop microscopic. Ask the screen for a 1080p-class mode;
-    /// if it refuses, `ScaledHostViewController` enlarges the desktop instead.
-    static func applyPreferredMode(to screen: UIScreen) {
-        let session = DesktopSession.shared
-        let modes = screen.availableModes
-        let current = screen.currentMode.map { "\(Int($0.size.width))×\(Int($0.size.height))" } ?? "?"
-        session.log("Display modes: " + modes.map { "\(Int($0.size.width))×\(Int($0.size.height))" }.joined(separator: " ") + " · current \(current)")
-        guard let currentMode = screen.currentMode, currentMode.size.width > 2048 else { return }
-        // 1080p-class: on a 4K monitor the desktop then looks like a normal 1080p screen.
-        let candidates = modes.filter { $0.size.width >= 1280 && $0.size.width <= 2048 }
-        guard let chosen = candidates.max(by: { $0.size.width < $1.size.width }) else {
-            session.log("No 1080p-class mode offered · will scale the desktop instead")
-            return
-        }
-        screen.currentMode = chosen
-        let after = screen.currentMode.map { "\(Int($0.size.width))×\(Int($0.size.height))" } ?? "?"
-        session.log("Requested mode \(Int(chosen.size.width))×\(Int(chosen.size.height)) · now \(after)")
-    }
 }
 
 /// Hosts the desktop and, when the window is very large (4K at 1×), draws it at 2× so the UI is
@@ -108,6 +87,7 @@ final class ScaledHostViewController: UIViewController {
         let b = view.bounds
         guard b.width > 0, b.height > 0 else { return }
         let s = Self.scale(for: b.size)
+        (view.window as? DesktopWindow)?.contentScale = s
         let logical = CGSize(width: (b.width / s).rounded(.down), height: (b.height / s).rounded(.down))
         child.view.transform = .identity
         child.view.bounds = CGRect(origin: .zero, size: logical)

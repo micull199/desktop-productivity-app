@@ -19,6 +19,11 @@ final class TrackpadUIView: UIView {
     private let clickFeedback = UIImpactFeedbackGenerator(style: .light)
     /// Fired when a single finger rests without moving for a moment (used to wake the screen).
     var onLongHold: (() -> Void)?
+    /// True for a touch sequence that belongs to the system pointer (AssistiveTouch turns mouse
+    /// clicks into touches on this screen) rather than a finger; those are ignored because the
+    /// hardware mouse already delivered the same click through GameController.
+    private var ignoringSequence = false
+    private var pendingTap: DispatchWorkItem?
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -31,6 +36,10 @@ final class TrackpadUIView: UIView {
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
         let all = event?.touches(for: self) ?? touches
         if all.count == touches.count {
+            ignoringSequence = touches.contains { $0.type == .indirectPointer } || input.hardwareMouseActive
+        }
+        if ignoringSequence { return }
+        if all.count == touches.count {
             clickFeedback.prepare()
             touchStart = Date().timeIntervalSinceReferenceDate
             moved = false
@@ -38,7 +47,7 @@ final class TrackpadUIView: UIView {
             // Tap, then touch again quickly and move: drag (like a trackpad's tap-and-a-half).
             if touchStart - lastTapTime < 0.3 {
                 dragging = true
-                input.button(.left, pressed: true)
+                input.trackpadButton(.left, pressed: true)
             }
         }
         maxTouches = max(maxTouches, all.count)
@@ -56,6 +65,7 @@ final class TrackpadUIView: UIView {
     }
 
     override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
+        if ignoringSequence { return }
         let all = event?.touches(for: self) ?? touches
         let sensitivity = Settings.shared.trackpadSensitivity
         if moved { holdTimer?.invalidate() }
@@ -71,7 +81,7 @@ final class TrackpadUIView: UIView {
             dx /= n; dy /= n
             if abs(dx) + abs(dy) > 0.5 { moved = true }
             let natural: CGFloat = Settings.shared.naturalScrolling ? -1 : 1
-            input.scroll(dx: dx * natural * 1.5, dy: dy * natural * 1.5)
+            input.trackpadScroll(dx: dx * natural * 1.5, dy: dy * natural * 1.5)
         } else if let t = all.first {
             let p = t.location(in: self)
             if let last = lastPoints[ObjectIdentifier(t)] {
@@ -80,7 +90,7 @@ final class TrackpadUIView: UIView {
                 // Light acceleration so small motions are precise and big ones travel far.
                 let speed = hypot(dx, dy)
                 let gain = sensitivity * (1 + min(speed / 40, 1.4))
-                input.moveCursor(by: CGPoint(x: dx * gain, y: dy * gain))
+                input.trackpadMove(by: CGPoint(x: dx * gain, y: dy * gain))
             }
             lastPoints[ObjectIdentifier(t)] = p
         }
@@ -90,27 +100,36 @@ final class TrackpadUIView: UIView {
         for t in touches { lastPoints[ObjectIdentifier(t)] = nil }
         let remaining = (event?.touches(for: self) ?? []).filter { $0.phase != .ended && $0.phase != .cancelled }
         guard remaining.isEmpty else { return }
+        if ignoringSequence { ignoringSequence = false; return }
         holdTimer?.invalidate()
         let duration = Date().timeIntervalSinceReferenceDate - touchStart
         if dragging {
             dragging = false
-            input.button(.left, pressed: false)
+            input.trackpadButton(.left, pressed: false)
             return
         }
         if !moved, duration < 0.3 {
             clickFeedback.impactOccurred()
-            if maxTouches >= 2 {
-                input.click(.right)
-            } else {
-                input.click(.left)
-                lastTapTime = Date().timeIntervalSinceReferenceDate
+            // A mouse click and its AssistiveTouch echo can arrive in either order, so wait a
+            // moment and skip the tap if the hardware mouse spoke in the meantime.
+            let right = maxTouches >= 2
+            if !right { lastTapTime = Date().timeIntervalSinceReferenceDate }
+            pendingTap?.cancel()
+            let work = DispatchWorkItem { [weak self] in
+                MainActor.assumeIsolated {
+                    guard let self else { return }
+                    self.input.trackpadClick(right ? .right : .left)
+                }
             }
+            pendingTap = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05, execute: work)
         }
     }
 
     override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
         lastPoints.removeAll()
-        if dragging { dragging = false; input.button(.left, pressed: false) }
+        ignoringSequence = false
+        if dragging { dragging = false; input.trackpadButton(.left, pressed: false) }
     }
 }
 

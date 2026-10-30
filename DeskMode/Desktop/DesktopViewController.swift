@@ -106,12 +106,21 @@ final class DesktopViewController: UIViewController, InputSink {
     #if DEBUG
     private var snapshotTimer: Timer?
 
-    /// Debug builds write Documents/desktop.png every few seconds while on the external display,
-    /// so the desktop can be reviewed from a Mac with `devicectl device copy from`.
+    /// Debug builds write Documents/desktop.png on request: drop a file named `snapshot.request`
+    /// into the app's Documents (e.g. with `devicectl device copy to`) and the next check consumes
+    /// it and writes one frame. Snapshots are not taken otherwise, since drawing the hierarchy
+    /// costs several frames.
     private func startSnapshotTimer() {
-        snapshotTimer = Timer.scheduledTimer(withTimeInterval: 4, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.writeSnapshot() }
+        snapshotTimer = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.writeSnapshotIfRequested() }
         }
+    }
+
+    private func writeSnapshotIfRequested() {
+        let request = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("snapshot.request")
+        guard FileManager.default.fileExists(atPath: request.path) else { return }
+        try? FileManager.default.removeItem(at: request)
+        writeSnapshot()
     }
 
     private func writeSnapshot() {

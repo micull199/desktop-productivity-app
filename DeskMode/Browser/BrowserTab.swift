@@ -213,6 +213,17 @@ extension BrowserTab: WKNavigationDelegate {
             decisionHandler(.cancel)
             return
         }
+        // A user-initiated navigation to a site with an installed app is a universal link: WebKit
+        // would hand it to that app and iOS would leave the desktop. Re-issuing the same request
+        // ourselves keeps it in this tab, because programmatic loads never open other apps.
+        if navigationAction.navigationType == .linkActivated,
+           navigationAction.targetFrame?.isMainFrame == true,
+           let url, let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https" {
+            isStartPage = false
+            decisionHandler(.cancel)
+            webView.load(navigationAction.request)
+            return
+        }
         if navigationAction.navigationType != .other, !Self.isStartPageURL(url) {
             isStartPage = false
         }

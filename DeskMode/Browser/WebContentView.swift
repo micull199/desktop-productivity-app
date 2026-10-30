@@ -37,9 +37,32 @@ final class WebContentView: UIView, PointerTarget, KeyTarget {
 
     required init?(coder: NSCoder) { fatalError() }
 
+    /// User-chosen zoom (⌘+ / ⌘−). WKWebView's `pageZoom` also carries the desktop's pixel scale.
+    var userZoom: CGFloat = 1 { didSet { applyZoom() } }
+
+    /// 2 on a 4K monitor: the desktop is drawn through a 2× transform, so the web view is given
+    /// twice the bounds and the inverse transform. Its net transform is identity, WebKit renders
+    /// straight to pixels, and `pageZoom` doubles so the page keeps the same CSS layout width.
+    private var pixelScale: CGFloat { (window as? DesktopWindow)?.contentScale ?? 1 }
+
     override func layoutSubviews() {
         super.layoutSubviews()
-        webView.frame = bounds
+        let s = pixelScale
+        webView.transform = .identity
+        webView.bounds = CGRect(x: 0, y: 0, width: bounds.width * s, height: bounds.height * s)
+        webView.center = CGPoint(x: bounds.midX, y: bounds.midY)
+        if s != 1 { webView.transform = CGAffineTransform(scaleX: 1 / s, y: 1 / s) }
+        applyZoom()
+    }
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        setNeedsLayout()
+    }
+
+    private func applyZoom() {
+        let z = userZoom * pixelScale
+        if webView.pageZoom != z { webView.pageZoom = z }
     }
 
     // MARK: - Helpers
@@ -109,6 +132,8 @@ final class WebContentView: UIView, PointerTarget, KeyTarget {
 
     private func scrollMainDocument(dx: CGFloat, dy: CGFloat) {
         let sv = webView.scrollView
+        let s = pixelScale
+        let dx = dx * s, dy = dy * s
         var o = sv.contentOffset
         let maxX = max(0, sv.contentSize.width - sv.bounds.width + sv.adjustedContentInset.right)
         let maxY = max(0, sv.contentSize.height - sv.bounds.height + sv.adjustedContentInset.bottom)

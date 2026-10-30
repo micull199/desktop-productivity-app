@@ -434,7 +434,7 @@ final class BrowserWindowContent: UIView, WindowContent {
         guard let desktop else { return }
         let history = BrowserHistory.shared.recent(12)
         let bookmarks = Array(BrowserBookmarks.shared.items.suffix(12).reversed())
-        let zoomPercent = Int(((active?.webView.pageZoom ?? 1) * 100).rounded())
+        let zoomPercent = Int(((active?.contentView.userZoom ?? 1) * 100).rounded())
         var items: [MenuItem] = [
             MenuItem(title: "New Tab", symbol: "plus.square", shortcut: "⌘T") { [weak self] in self?.openTab(url: nil) },
             MenuItem(title: "New Window", symbol: "macwindow.badge.plus", shortcut: "⌘N") { [weak self] in self?.desktop?.open(.browser, forceNew: true) },
@@ -632,14 +632,14 @@ final class BrowserWindowContent: UIView, WindowContent {
     }
 
     private func adjustZoom(_ delta: CGFloat) {
-        guard let wv = active?.webView else { return }
-        wv.pageZoom = min(3, max(0.5, (wv.pageZoom * 10).rounded() / 10 + delta))
-        desktop?.showToast("Zoom \(Int((wv.pageZoom * 100).rounded()))%")
+        guard let wv = active?.contentView else { return }
+        wv.userZoom = min(3, max(0.5, (wv.userZoom * 10).rounded() / 10 + delta))
+        desktop?.showToast("Zoom \(Int((wv.userZoom * 100).rounded()))%")
     }
 
     private func resetZoom() {
-        guard let wv = active?.webView, wv.pageZoom != 1 else { return }
-        wv.pageZoom = 1
+        guard let wv = active?.contentView, wv.userZoom != 1 else { return }
+        wv.userZoom = 1
         desktop?.showToast("Zoom 100%")
     }
 

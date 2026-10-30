@@ -19,7 +19,8 @@ final class InputRouter: ObservableObject {
 
     static let shared = InputRouter()
 
-    @Published private(set) var cursor = CGPoint(x: 200, y: 200)
+    /// Not published on purpose: it changes up to 120 times a second and nothing in SwiftUI needs it.
+    private(set) var cursor = CGPoint(x: 200, y: 200)
     @Published private(set) var mouseConnected = false
     /// True once a hardware mouse has actually moved the cursor. On iPhone iOS only forwards
     /// mouse movement to apps while AssistiveTouch is enabled, so a connected-but-silent mouse
@@ -38,6 +39,11 @@ final class InputRouter: ObservableObject {
 
     private var started = false
     private var observedMice: [ObjectIdentifier: GCMouse] = [:]
+    /// Raw mouse reports land here from GameController's queue and are drained once per frame.
+    private let rawInput = RawInputBuffer()
+    private static let inputQueue = DispatchQueue(label: "com.micull.DeskMode.input", qos: .userInteractive)
+    private var frameClock: FrameClock?
+    private var loggedDuplicates = false
     private var observedKeyboards: [ObjectIdentifier: GCKeyboard] = [:]
     /// True once GameController has delivered a key: UIKit presses are then ignored to avoid doubles.
     private(set) var gameControllerKeyboardActive = false
@@ -75,6 +81,9 @@ final class InputRouter: ObservableObject {
         nc.addObserver(self, selector: #selector(keyboardDidConnect(_:)), name: .GCKeyboardDidConnect, object: nil)
         nc.addObserver(self, selector: #selector(keyboardDidDisconnect(_:)), name: .GCKeyboardDidDisconnect, object: nil)
 
+        frameClock = FrameClock { [weak self] in
+            MainActor.assumeIsolated { self?.drainRawInput() }
+        }
         for mouse in GCMouse.mice() { attach(mouse) }
         if let kb = GCKeyboard.coalesced { attach(kb) }
         keyboardConnected = GCKeyboard.coalesced != nil
@@ -152,13 +161,6 @@ final class InputRouter: ObservableObject {
     private func attach(_ mouse: GCMouse) {
         guard observedMice[ObjectIdentifier(mouse)] == nil else { return }
         let name = mouse.vendorName ?? "unnamed"
-        // The same physical mouse can show up as a second GCMouse object; attaching both would
-        // double every movement, so only the first object per vendor name gets handlers.
-        if observedMice.values.contains(where: { $0.vendorName == mouse.vendorName }) {
-            log("Mouse duplicate ignored: \(name)")
-            observedMice[ObjectIdentifier(mouse)] = mouse
-            return
-        }
         observedMice[ObjectIdentifier(mouse)] = mouse
         mouseConnected = true
         log("Mouse connected (GameController): \(name) · buttons L\(mouse.mouseInput?.rightButton != nil ? "+R" : "")")
@@ -173,26 +175,70 @@ final class InputRouter: ObservableObject {
                 }
             }
         }
-        mouse.handlerQueue = .main
+        // Reports arrive on a background queue and are buffered; the frame clock drains them on
+        // the main thread once per screen refresh.
+        mouse.handlerQueue = Self.inputQueue
         guard let input = mouse.mouseInput else { return }
+        let buffer = rawInput
+        let source = ObjectIdentifier(mouse)
+        input.mouseMovedHandler = { _, dx, dy in
+            buffer.pushMove(dx: CGFloat(dx), dy: CGFloat(dy), from: source)
+        }
+        input.leftButton.pressedChangedHandler = { _, _, pressed in
+            buffer.pushButton(.left, pressed: pressed, from: source)
+        }
+        input.rightButton?.pressedChangedHandler = { _, _, pressed in
+            buffer.pushButton(.right, pressed: pressed, from: source)
+        }
+        input.middleButton?.pressedChangedHandler = { _, _, pressed in
+            buffer.pushButton(.middle, pressed: pressed, from: source)
+        }
+        input.scroll.valueChangedHandler = { _, x, y in
+            buffer.pushWheel(dx: CGFloat(x), dy: CGFloat(y))
+        }
+    }
 
-        input.mouseMovedHandler = { [weak self] _, dx, dy in
-            MainActor.assumeIsolated {
-                self?.mouseMoved(dx: CGFloat(dx), dy: CGFloat(dy))
+    /// Runs once per display frame: applies everything the mouse reported since the last frame.
+    private func drainRawInput() {
+        let events = rawInput.drain()
+        guard !events.isEmpty else { return }
+        for event in events {
+            switch event {
+            case .move(let dx, let dy): mouseMoved(dx: dx, dy: dy)
+            case .button(let b, let pressed): button(b, pressed: pressed)
+            case .wheel(let dx, let dy): wheel(dx: dx, dy: dy)
             }
         }
-        input.leftButton.pressedChangedHandler = { [weak self] _, _, pressed in
-            MainActor.assumeIsolated { self?.button(.left, pressed: pressed) }
+        if !loggedDuplicates, rawInput.duplicatesDropped > 0 {
+            loggedDuplicates = true
+            log("Dropping duplicate reports: the mouse is exposed as more than one device")
         }
-        input.rightButton?.pressedChangedHandler = { [weak self] _, _, pressed in
-            MainActor.assumeIsolated { self?.button(.right, pressed: pressed) }
-        }
-        input.middleButton?.pressedChangedHandler = { [weak self] _, _, pressed in
-            MainActor.assumeIsolated { self?.button(.middle, pressed: pressed) }
-        }
-        input.scroll.valueChangedHandler = { [weak self] _, x, y in
-            MainActor.assumeIsolated { self?.wheel(dx: CGFloat(x), dy: CGFloat(y)) }
-        }
+    }
+
+    /// True while a hardware mouse has reported anything in the last second. Used to ignore the
+    /// touches AssistiveTouch synthesises on the phone screen for the same clicks and drags.
+    var hardwareMouseActive: Bool { CACurrentMediaTime() - rawInput.lastActivity < 1.0 }
+
+    // MARK: - Trackpad (iPhone screen) entry points
+
+    func trackpadMove(by delta: CGPoint) {
+        guard !hardwareMouseActive else { return }
+        moveCursor(by: delta)
+    }
+
+    func trackpadButton(_ b: PointerButton, pressed: Bool) {
+        guard !hardwareMouseActive else { return }
+        button(b, pressed: pressed)
+    }
+
+    func trackpadClick(_ b: PointerButton) {
+        guard !hardwareMouseActive else { return }
+        click(b)
+    }
+
+    func trackpadScroll(dx: CGFloat, dy: CGFloat) {
+        guard !hardwareMouseActive else { return }
+        scroll(dx: dx, dy: dy)
     }
 
     private func mouseMoved(dx: CGFloat, dy: CGFloat) {
