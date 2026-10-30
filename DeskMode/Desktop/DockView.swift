@@ -27,6 +27,9 @@ final class DockItemView: UIView, PointerTarget {
 
     required init?(coder: NSCoder) { fatalError() }
 
+    // The Dock measures its stack with Auto Layout; without this the items compress to zero width.
+    override var intrinsicContentSize: CGSize { CGSize(width: 56, height: 64) }
+
     override func layoutSubviews() {
         super.layoutSubviews()
         imageView.frame = CGRect(x: 4, y: 2, width: bounds.width - 8, height: bounds.width - 8)

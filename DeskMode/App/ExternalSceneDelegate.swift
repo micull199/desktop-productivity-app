@@ -86,6 +86,7 @@ final class ScaledHostViewController: UIViewController {
         addChild(child)
         view.addSubview(child.view)
         child.didMove(toParent: self)
+        layoutChild()
     }
 
     static func scale(for size: CGSize) -> CGFloat {
@@ -94,7 +95,12 @@ final class ScaledHostViewController: UIViewController {
 
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
+        layoutChild()
+    }
+
+    private func layoutChild() {
         let b = view.bounds
+        guard b.width > 0, b.height > 0 else { return }
         let s = Self.scale(for: b.size)
         let logical = CGSize(width: (b.width / s).rounded(.down), height: (b.height / s).rounded(.down))
         child.view.transform = .identity

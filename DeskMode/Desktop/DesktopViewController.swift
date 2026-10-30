@@ -92,12 +92,10 @@ final class DesktopViewController: UIViewController, InputSink {
         observeSettings()
     }
 
+    private var openedInitialWindow = false
+
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
-        if windowManager.windows.isEmpty {
-            // First launch: open the browser so the desktop is immediately useful.
-            open(.browser)
-        }
         cursorView.place(at: input.cursor)
     }
 
@@ -117,6 +115,12 @@ final class DesktopViewController: UIViewController, InputSink {
         windowManager.workArea = CGRect(x: 0, y: Theme.menuBarHeight, width: b.width, height: b.height - Theme.menuBarHeight - Theme.dockHeight - 10)
         windowManager.relayout()
         input.desktopBounds = b
+        if !openedInitialWindow, b.width > 200, b.height > 200 {
+            // First real layout: open the browser so the desktop is immediately useful.
+            openedInitialWindow = true
+            if windowManager.windows.isEmpty { open(.browser) }
+            cursorView.place(at: input.cursor)
+        }
         if let launcher {
             launcher.center = CGPoint(x: b.midX, y: b.height * 0.22 + launcher.bounds.height / 2)
         }

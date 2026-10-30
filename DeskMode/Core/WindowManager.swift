@@ -144,6 +144,9 @@ final class WindowManager {
     // MARK: - Geometry
 
     private func cascadeFrame(for size: CGSize) -> CGRect {
+        // Before the first layout the work area is empty; place the window at its natural size
+        // and let `relayout()` put it somewhere sensible once the area is known.
+        guard workArea.width > 200, workArea.height > 200 else { return CGRect(origin: .zero, size: size) }
         let area = workArea.insetBy(dx: 12, dy: 12)
         let w = min(size.width, area.width)
         let h = min(size.height, area.height)
@@ -165,8 +168,13 @@ final class WindowManager {
 
     /// Keeps windows reachable after the display size changes.
     func relayout() {
+        guard workArea.width > 200, workArea.height > 200 else { return }
         for w in windows {
             var f = w.frame
+            if f.width < 200 || f.height < 150 || (f.origin == .zero && !w.isMinimized) {
+                // Opened before the display had a size (or collapsed): give it a proper frame.
+                f = cascadeFrame(for: w.app.defaultSize)
+            }
             f.size.width = min(f.width, workArea.width)
             f.size.height = min(f.height, workArea.height)
             f.origin = clampOrigin(f.origin, size: f.size)
