@@ -28,6 +28,10 @@ final class InputRouter: ObservableObject {
     @Published private(set) var mouseMovementSeen = false
     private var silentMouseTimer: Timer?
     @Published private(set) var keyboardConnected = false
+    /// On iPhone, iOS only passes mouse input to apps while AssistiveTouch is running. There is no
+    /// public way around that, so the phone UI watches this and guides a one-time automation that
+    /// switches AssistiveTouch on whenever DeskMode opens.
+    @Published private(set) var assistiveTouchOn = UIAccessibility.isAssistiveTouchRunning
     @Published private(set) var modifiers: UIKeyModifierFlags = []
 
     /// Bounds in which the cursor may move (the external window's bounds).
@@ -44,6 +48,7 @@ final class InputRouter: ObservableObject {
     private static let inputQueue = DispatchQueue(label: "com.micull.DeskMode.input", qos: .userInteractive)
     private var frameClock: FrameClock?
     private var loggedDuplicates = false
+    private var loggedFirstButton = false
     private var observedKeyboards: [ObjectIdentifier: GCKeyboard] = [:]
     /// True once GameController has delivered a key: UIKit presses are then ignored to avoid doubles.
     private(set) var gameControllerKeyboardActive = false
@@ -80,6 +85,8 @@ final class InputRouter: ObservableObject {
         nc.addObserver(self, selector: #selector(mouseDidDisconnect(_:)), name: .GCMouseDidDisconnect, object: nil)
         nc.addObserver(self, selector: #selector(keyboardDidConnect(_:)), name: .GCKeyboardDidConnect, object: nil)
         nc.addObserver(self, selector: #selector(keyboardDidDisconnect(_:)), name: .GCKeyboardDidDisconnect, object: nil)
+        nc.addObserver(self, selector: #selector(assistiveTouchChanged), name: UIAccessibility.assistiveTouchStatusDidChangeNotification, object: nil)
+        nc.addObserver(self, selector: #selector(assistiveTouchChanged), name: UIApplication.didBecomeActiveNotification, object: nil)
 
         frameClock = FrameClock { [weak self] in
             MainActor.assumeIsolated { self?.drainRawInput() }
@@ -87,7 +94,14 @@ final class InputRouter: ObservableObject {
         for mouse in GCMouse.mice() { attach(mouse) }
         if let kb = GCKeyboard.coalesced { attach(kb) }
         keyboardConnected = GCKeyboard.coalesced != nil
-        log("Input started · mice \(GCMouse.mice().count) · keyboard \(GCKeyboard.coalesced != nil)")
+        log("Input started · mice \(GCMouse.mice().count) · keyboard \(GCKeyboard.coalesced != nil) · AssistiveTouch \(assistiveTouchOn ? "on" : "off")")
+    }
+
+    @objc private func assistiveTouchChanged() {
+        let on = UIAccessibility.isAssistiveTouchRunning
+        guard on != assistiveTouchOn else { return }
+        assistiveTouchOn = on
+        log("AssistiveTouch \(on ? "on: mouse input available" : "off: iOS stops passing the mouse to apps")")
     }
 
     // MARK: - Mouse (GameController)
@@ -205,7 +219,9 @@ final class InputRouter: ObservableObject {
         for event in events {
             switch event {
             case .move(let dx, let dy): mouseMoved(dx: dx, dy: dy)
-            case .button(let b, let pressed): button(b, pressed: pressed)
+            case .button(let b, let pressed):
+                if !loggedFirstButton { loggedFirstButton = true; log("Mouse buttons arriving via GameController") }
+                button(b, pressed: pressed)
             case .wheel(let dx, let dy): wheel(dx: dx, dy: dy)
             }
         }

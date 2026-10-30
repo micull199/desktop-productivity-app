@@ -87,6 +87,7 @@ private struct SetupView: View {
     @ObservedObject private var session = DesktopSession.shared
     @ObservedObject private var input = InputRouter.shared
     @ObservedObject private var settings = Settings.shared
+    @State private var showMouseSetup = false
 
     var body: some View {
         ScrollView {
@@ -108,6 +109,11 @@ private struct SetupView: View {
             .padding(.bottom, 40)
         }
         .scrollIndicators(.hidden)
+        .sheet(isPresented: $showMouseSetup) {
+            MouseSetupSheet()
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
+        }
         .background(
             ZStack {
                 Color.black
@@ -163,21 +169,22 @@ private struct SetupView: View {
 
     private var mouseTone: StatusTone {
         guard input.mouseConnected else { return .idle }
-        return input.mouseMovementSeen ? .good : .warn
+        return input.assistiveTouchOn ? .good : .warn
     }
 
     private var mouseState: String {
         guard input.mouseConnected else { return "Not detected" }
-        return input.mouseMovementSeen ? "Connected" : "Connected, no movement"
+        return input.assistiveTouchOn ? "Ready" : "Needs one-time setup"
     }
 
     private var mouseFix: StatusFix? {
-        if input.mouseConnected, !input.mouseMovementSeen {
-            return StatusFix(text: "Turn on Settings › Accessibility › Touch › AssistiveTouch, then move the mouse.",
-                             buttonTitle: "Open Settings", action: openSystemSettings)
+        if input.mouseConnected, !input.assistiveTouchOn {
+            return StatusFix(text: "iPhone only shares a mouse with apps through AssistiveTouch. Set it to switch on by itself whenever DeskMode opens.",
+                             buttonTitle: "Set Up", action: { PhoneHaptics.tap(); showMouseSetup = true })
         }
         if !input.mouseConnected {
-            return StatusFix(text: "Pair in Settings › Bluetooth. Without a mouse this screen works as a trackpad.")
+            return StatusFix(text: "Pair in Settings › Bluetooth. Without a mouse this screen works as a trackpad.",
+                             buttonTitle: "Mouse Setup", action: { PhoneHaptics.tap(); showMouseSetup = true })
         }
         return nil
     }
@@ -480,7 +487,7 @@ private struct ConnectedView: View {
                         .transition(.opacity)
                         .padding(.bottom, 28)
                 }
-                if input.mouseConnected, !input.mouseMovementSeen, controlsVisible {
+                if input.mouseConnected, !input.assistiveTouchOn, controlsVisible {
                     assistiveTouchHint
                         .transition(.opacity)
                 }
@@ -562,7 +569,7 @@ private struct ConnectedView: View {
     private var assistiveTouchHint: some View {
         HStack(alignment: .top, spacing: 8) {
             Image(systemName: "exclamationmark.triangle.fill")
-            Text("Mouse connected but silent. Turn on Settings › Accessibility › Touch › AssistiveTouch.")
+            Text("The mouse needs AssistiveTouch. Triple-click the side button, or set up the automatic switch on the DeskMode setup screen.")
         }
         .font(.footnote)
         .foregroundStyle(PhoneStyle.warn)
@@ -647,5 +654,125 @@ private struct ControlButton: View {
             )
         }
         .buttonStyle(PressableButtonStyle())
+    }
+}
+
+
+// MARK: - Mouse setup (one-time AssistiveTouch automation)
+
+/// iOS on iPhone only routes a mouse to apps while AssistiveTouch runs, and apps cannot switch it
+/// on themselves. Shortcuts can, so this sheet walks through two personal automations that turn
+/// AssistiveTouch on when DeskMode opens and off when it closes. After that the user never has to
+/// think about it. Status updates live from `UIAccessibility.isAssistiveTouchRunning`.
+private struct MouseSetupSheet: View {
+    @ObservedObject private var input = InputRouter.shared
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: PhoneStyle.gutter) {
+                    liveStatus
+                    automationCard
+                    quickToggleCard
+                    Text("iOS keeps this switch with you rather than with apps, so DeskMode can't flip it itself. The automation does it for you in the background, with no prompts.")
+                        .font(.footnote)
+                        .foregroundStyle(.tertiary)
+                }
+                .padding(PhoneStyle.gutter)
+            }
+            .background(Color.black.ignoresSafeArea())
+            .navigationTitle("Mouse Setup")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }.fontWeight(.semibold)
+                }
+            }
+        }
+        .preferredColorScheme(.dark)
+    }
+
+    private var liveStatus: some View {
+        PhoneCard {
+            HStack(spacing: 12) {
+                Image(systemName: input.assistiveTouchOn ? "checkmark.circle.fill" : "cursorarrow.motionlines")
+                    .font(.system(size: 26, weight: .medium))
+                    .foregroundStyle(input.assistiveTouchOn ? PhoneStyle.good : PhoneStyle.warn)
+                    .contentTransition(.symbolEffect(.replace))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(input.assistiveTouchOn ? "Mouse ready" : "Mouse not available to apps")
+                        .font(.headline)
+                    Text(input.assistiveTouchOn
+                         ? "AssistiveTouch is on, so DeskMode receives the mouse."
+                         : "Turn on the automatic switch below. This screen updates when it works.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 0)
+            }
+            .animation(.easeInOut(duration: 0.25), value: input.assistiveTouchOn)
+        }
+    }
+
+    private var automationCard: some View {
+        PhoneCard {
+            VStack(alignment: .leading, spacing: 14) {
+                Label("Automatic (recommended)", systemImage: "wand.and.stars")
+                    .font(.headline)
+                Text("Two Shortcuts automations, set up once. AssistiveTouch then turns on when DeskMode opens and off when you leave.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                SetupStep(number: 1, text: "In Shortcuts, tap Automation, then the + button, then App.")
+                SetupStep(number: 2, text: "Choose DeskMode, tick Is Opened, and select Run Immediately. Tap Next.")
+                SetupStep(number: 3, text: "Tap New Blank Automation, add the Set AssistiveTouch action, and leave it on Turn On.")
+                SetupStep(number: 4, text: "Repeat with Is Closed and Turn Off, so AssistiveTouch is gone when you are not using DeskMode.")
+                Button {
+                    PhoneHaptics.tap()
+                    if let url = URL(string: "shortcuts://") { UIApplication.shared.open(url) }
+                } label: {
+                    Label("Open Shortcuts", systemImage: "arrow.up.forward.app")
+                        .font(.body.weight(.semibold))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                        .foregroundStyle(.white)
+                        .background(PhoneStyle.accentGradient, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                }
+                .buttonStyle(PressableButtonStyle())
+            }
+        }
+    }
+
+    private var quickToggleCard: some View {
+        PhoneCard {
+            VStack(alignment: .leading, spacing: 10) {
+                Label("Quick toggle", systemImage: "button.vertical.right.press")
+                    .font(.headline)
+                Text("Prefer a manual switch? In Settings › Accessibility › Accessibility Shortcut, choose AssistiveTouch. Triple-click the side button to turn it on or off.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                Text("Tip: in AssistiveTouch, set Idle Opacity to 15% so its button stays out of the way on the dark phone screen.")
+                    .font(.footnote)
+                    .foregroundStyle(.tertiary)
+            }
+        }
+    }
+}
+
+private struct SetupStep: View {
+    let number: Int
+    let text: String
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
+            Text("\(number)")
+                .font(.caption.weight(.bold))
+                .foregroundStyle(.white)
+                .frame(width: 20, height: 20)
+                .background(PhoneStyle.accent, in: Circle())
+            Text(text)
+                .font(.subheadline)
+                .fixedSize(horizontal: false, vertical: true)
+        }
     }
 }
