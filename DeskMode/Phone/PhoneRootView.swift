@@ -81,8 +81,10 @@ private struct SetupView: View {
                        hint: "Keep DeskMode open, then connect USB-C to a monitor (DisplayPort) or an HDMI adapter.")
             StatusCard(symbol: "keyboard", title: "Keyboard", detail: input.keyboardConnected ? "Connected" : "Not detected", ok: input.keyboardConnected,
                        hint: "Pair in Settings › Bluetooth, or plug in over USB-C.")
-            StatusCard(symbol: "computermouse", title: "Mouse", detail: input.mouseConnected ? "Connected" : "Not detected", ok: input.mouseConnected,
-                       hint: "Pair in Settings › Bluetooth. Without a mouse the iPhone screen works as a trackpad.")
+            StatusCard(symbol: "computermouse", title: "Mouse",
+                       detail: input.mouseConnected ? (input.mouseMovementSeen ? "Connected" : "Connected, no movement") : "Not detected",
+                       ok: input.mouseConnected && input.mouseMovementSeen,
+                       hint: mouseHint)
         }
     }
 
@@ -110,6 +112,13 @@ private struct SetupView: View {
         }
         .padding(16)
         .background(RoundedRectangle(cornerRadius: 16).fill(Color.white.opacity(0.06)))
+    }
+
+    private var mouseHint: String {
+        if input.mouseConnected, !input.mouseMovementSeen {
+            return "iOS is not passing this mouse's movement to apps. Turn on Settings › Accessibility › Touch › AssistiveTouch, then move the mouse."
+        }
+        return "Pair in Settings › Bluetooth. Without a mouse the iPhone screen works as a trackpad."
     }
 
     private var steps: some View {
@@ -225,6 +234,14 @@ private struct ConnectedView: View {
                         .transition(.move(edge: .top).combined(with: .opacity))
                 }
                 Spacer()
+                if input.mouseConnected, !input.mouseMovementSeen, showControls || !session.phoneScreenDimmed {
+                    Text("Mouse connected but silent: turn on Settings › Accessibility › Touch › AssistiveTouch")
+                        .font(.footnote)
+                        .foregroundStyle(.orange)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 24)
+                        .padding(.bottom, 6)
+                }
                 if settings.phoneAsTrackpad, showControls || !session.phoneScreenDimmed {
                     Text(input.mouseConnected ? "Trackpad active alongside your mouse" : "Drag to move the cursor · tap to click · two fingers to scroll")
                         .font(.footnote)

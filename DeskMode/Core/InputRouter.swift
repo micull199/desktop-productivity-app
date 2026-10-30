@@ -21,6 +21,11 @@ final class InputRouter: ObservableObject {
 
     @Published private(set) var cursor = CGPoint(x: 200, y: 200)
     @Published private(set) var mouseConnected = false
+    /// True once a hardware mouse has actually moved the cursor. On iPhone iOS only forwards
+    /// mouse movement to apps while AssistiveTouch is enabled, so a connected-but-silent mouse
+    /// almost always means that setting is off.
+    @Published private(set) var mouseMovementSeen = false
+    private var silentMouseTimer: Timer?
     @Published private(set) var keyboardConnected = false
     @Published private(set) var modifiers: UIKeyModifierFlags = []
 
@@ -157,6 +162,17 @@ final class InputRouter: ObservableObject {
         observedMice[ObjectIdentifier(mouse)] = mouse
         mouseConnected = true
         log("Mouse connected (GameController): \(name) · buttons L\(mouse.mouseInput?.rightButton != nil ? "+R" : "")")
+        if !mouseMovementSeen, silentMouseTimer == nil {
+            silentMouseTimer = Timer.scheduledTimer(withTimeInterval: 10, repeats: false) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    guard let self else { return }
+                    self.silentMouseTimer = nil
+                    if self.mouseConnected, !self.mouseMovementSeen {
+                        self.log("Mouse connected but no movement for 10 s · AssistiveTouch is probably off")
+                    }
+                }
+            }
+        }
         mouse.handlerQueue = .main
         guard let input = mouse.mouseInput else { return }
 
@@ -181,6 +197,7 @@ final class InputRouter: ObservableObject {
 
     private func mouseMoved(dx: CGFloat, dy: CGFloat) {
         lastHardwareMouseMove = Date().timeIntervalSinceReferenceDate
+        if !mouseMovementSeen { mouseMovementSeen = true }
         if !loggedFirstMouseMove { loggedFirstMouseMove = true; log("Mouse movement arriving via GameController") }
         // GameController reports a positive deltaY for upward motion; screen space grows downward.
         let direction: CGFloat = settings.invertMouseY ? 1 : -1
