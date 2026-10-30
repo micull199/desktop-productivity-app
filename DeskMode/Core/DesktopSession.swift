@@ -90,6 +90,12 @@ final class DesktopSession: ObservableObject {
         desktop.onWindowCountChange = { [weak self] count in self?.openWindowCount = count }
     }
 
+    func externalDisplayDidResize(size: CGSize, scale: CGFloat) {
+        guard displayState.isConnected else { return }
+        displayState = .connected(size: size, scale: scale)
+        log("Desktop resized: \(Int(size.width * scale))×\(Int(size.height * scale))")
+    }
+
     func externalDisplayDidDisconnect() {
         log("Desktop disconnected")
         desktop = nil
