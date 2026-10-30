@@ -6,6 +6,10 @@ protocol WindowContent: UIView {
     var app: DeskApp { get }
     var windowTitle: String { get }
     var onTitleChange: ((String) -> Void)? { get set }
+    /// When true the content fills the whole window and draws its own title bar (e.g. the
+    /// browser's tab strip). The traffic lights stay; the window still handles dragging for any
+    /// point in the top `Theme.titleBarHeight` that no PointerTarget inside the content claims.
+    var drawsOwnTitleBar: Bool { get }
     /// Keyboard events reach the content only when its window is focused.
     func handleKey(_ event: KeyEvent) -> Bool
     /// Menu-bar actions (File › New Tab, Edit › Copy …). Return `true` when handled.
@@ -13,6 +17,10 @@ protocol WindowContent: UIView {
     func contentDidFocus()
     func contentDidBlur()
     func windowWillClose()
+}
+
+extension WindowContent {
+    var drawsOwnTitleBar: Bool { false }
 }
 
 enum MenuAction {
@@ -42,7 +50,7 @@ final class DesktopWindowView: UIView, PointerTarget {
     var onSnapPreview: ((WindowManager.Tile?) -> Void)?
 
     private let clipView = UIView()
-    private let titleBar = UIView()
+    private let titleBar = PassThroughView()
     private let hairline = UIView()
     private let titleLabel = UILabel()
     private let closeButton = DeskButton(style: .plain)
@@ -118,6 +126,11 @@ final class DesktopWindowView: UIView, PointerTarget {
         borderLayer.cornerCurve = .continuous
 
         content.onTitleChange = { [weak self] title in self?.titleLabel.text = title }
+        if content.drawsOwnTitleBar {
+            titleBar.backgroundColor = .clear
+            hairline.isHidden = true
+            titleLabel.isHidden = true
+        }
         setFocused(false)
     }
 
@@ -128,7 +141,9 @@ final class DesktopWindowView: UIView, PointerTarget {
         clipView.frame = bounds
         titleBar.frame = CGRect(x: 0, y: 0, width: bounds.width, height: Theme.titleBarHeight)
         hairline.frame = CGRect(x: 0, y: Theme.titleBarHeight - 1, width: bounds.width, height: 1)
-        contentContainer.frame = CGRect(x: 0, y: Theme.titleBarHeight, width: bounds.width, height: bounds.height - Theme.titleBarHeight)
+        contentContainer.frame = content.drawsOwnTitleBar
+            ? bounds
+            : CGRect(x: 0, y: Theme.titleBarHeight, width: bounds.width, height: bounds.height - Theme.titleBarHeight)
         content.frame = contentContainer.bounds
         let lightY = (Theme.titleBarHeight - 12) / 2
         closeButton.frame = CGRect(x: 12, y: lightY, width: 12, height: 12)
@@ -150,7 +165,7 @@ final class DesktopWindowView: UIView, PointerTarget {
 
     func setFocused(_ focused: Bool) {
         hasFocus = focused
-        titleBar.backgroundColor = focused ? Theme.titleBarBackground : Theme.titleBarBackgroundInactive
+        if !content.drawsOwnTitleBar { titleBar.backgroundColor = focused ? Theme.titleBarBackground : Theme.titleBarBackgroundInactive }
         titleLabel.textColor = focused ? Theme.text : Theme.secondaryText
         layer.shadowOpacity = focused ? 0.55 : 0.3
         layer.shadowRadius = focused ? 28 : 14

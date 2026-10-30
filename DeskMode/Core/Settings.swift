@@ -41,6 +41,8 @@ final class Settings: ObservableObject {
     @Published var phoneAsTrackpad: Bool { didSet { save() } }
     @Published var searchEngine: SearchEngine { didSet { save() } }
     @Published var desktopWebsites: Bool { didSet { save() } }
+    /// Identify to websites as desktop Google Chrome (otherwise Safari on a Mac). Applies to new tabs.
+    @Published var identifyAsChrome: Bool { didSet { save() } }
     @Published var wallpaper: Wallpaper { didSet { save() } }
     @Published var showClockSeconds: Bool { didSet { save() } }
     @Published var trackpadSensitivity: CGFloat { didSet { save() } }
@@ -57,6 +59,7 @@ final class Settings: ObservableObject {
         phoneAsTrackpad = d.object(forKey: "phoneAsTrackpad") as? Bool ?? true
         searchEngine = SearchEngine(rawValue: d.string(forKey: "searchEngine") ?? "") ?? .google
         desktopWebsites = d.object(forKey: "desktopWebsites") as? Bool ?? true
+        identifyAsChrome = d.object(forKey: "identifyAsChrome") as? Bool ?? true
         wallpaper = Wallpaper(rawValue: d.string(forKey: "wallpaper") ?? "") ?? .sonoma
         showClockSeconds = d.object(forKey: "showClockSeconds") as? Bool ?? false
         trackpadSensitivity = d.object(forKey: "trackpadSensitivity") as? CGFloat ?? 2.2
@@ -72,6 +75,7 @@ final class Settings: ObservableObject {
         defaults.set(phoneAsTrackpad, forKey: "phoneAsTrackpad")
         defaults.set(searchEngine.rawValue, forKey: "searchEngine")
         defaults.set(desktopWebsites, forKey: "desktopWebsites")
+        defaults.set(identifyAsChrome, forKey: "identifyAsChrome")
         defaults.set(wallpaper.rawValue, forKey: "wallpaper")
         defaults.set(showClockSeconds, forKey: "showClockSeconds")
         defaults.set(trackpadSensitivity, forKey: "trackpadSensitivity")
@@ -84,6 +88,7 @@ final class Settings: ObservableObject {
         dimPhoneWhenConnected = true
         phoneAsTrackpad = true
         searchEngine = .google
+        identifyAsChrome = true
         desktopWebsites = true
         wallpaper = .sonoma
         showClockSeconds = false

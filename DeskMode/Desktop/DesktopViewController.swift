@@ -90,7 +90,35 @@ final class DesktopViewController: UIViewController, InputSink {
         menuBar.setInputStatus(keyboard: input.keyboardConnected, mouse: input.mouseConnected)
         observeInputStatus()
         observeSettings()
+        #if DEBUG
+        startSnapshotTimer()
+        #endif
     }
+
+    #if DEBUG
+    private var snapshotTimer: Timer?
+
+    /// Debug builds write Documents/desktop.png every few seconds while on the external display,
+    /// so the desktop can be reviewed from a Mac with `devicectl device copy from`.
+    private func startSnapshotTimer() {
+        snapshotTimer = Timer.scheduledTimer(withTimeInterval: 4, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.writeSnapshot() }
+        }
+    }
+
+    private func writeSnapshot() {
+        guard !allowsTouchInput, view.window != nil, view.bounds.width > 0 else { return }
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        format.opaque = true
+        let image = UIGraphicsImageRenderer(bounds: view.bounds, format: format).image { _ in
+            view.drawHierarchy(in: view.bounds, afterScreenUpdates: false)
+        }
+        guard let data = image.pngData() else { return }
+        let url = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("desktop.png")
+        DispatchQueue.global(qos: .utility).async { try? data.write(to: url, options: .atomic) }
+    }
+    #endif
 
     private var openedInitialWindow = false
 
