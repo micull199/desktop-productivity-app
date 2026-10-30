@@ -22,4 +22,24 @@ enum Persistence {
         guard let data = try? encoder.encode(value) else { return }
         try? data.write(to: url(for: name), options: .atomic)
     }
+
+    /// True when a store with this name has been written before.
+    static func exists(_ name: String) -> Bool {
+        FileManager.default.fileExists(atPath: url(for: name).path)
+    }
+
+    static func remove(_ name: String) {
+        try? FileManager.default.removeItem(at: url(for: name))
+    }
+
+    /// Loads a store, or decodes it with a fallback type and converts (for schema migrations).
+    static func load<T: Codable, Legacy: Decodable>(_ type: T.Type, from name: String,
+                                                       migratingFrom legacy: Legacy.Type,
+                                                       _ convert: (Legacy) -> T) -> T? {
+        if let value = load(T.self, from: name) { return value }
+        guard let old = load(Legacy.self, from: name) else { return nil }
+        let converted = convert(old)
+        save(converted, to: name)
+        return converted
+    }
 }
