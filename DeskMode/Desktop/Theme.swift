@@ -307,3 +307,138 @@ extension UIFont.Weight {
         }
     }
 }
+
+// MARK: - Shell additions
+//
+// Constants used by the desktop shell (menu bar, Dock, windows, launcher, cursor, dialogs).
+// Everything below is additive: the names above are untouched.
+
+extension Theme {
+    /// Border of an unfocused window.
+    static let inactiveBorder = UIColor(white: 1, alpha: 0.08)
+    /// Alpha applied to disabled controls and menu rows.
+    static let disabledAlpha: CGFloat = 0.4
+    /// Track colour of a switched-off toggle.
+    static let toggleOffTrack = UIColor(white: 1, alpha: 0.18)
+    static let toggleOffTrackHover = UIColor(white: 1, alpha: 0.26)
+    /// Running-app indicator in the Dock.
+    static let dockIndicator = UIColor(white: 1, alpha: 0.85)
+    /// Glyph drawn inside a hovered traffic light.
+    static let trafficGlyph = UIColor(white: 0, alpha: 0.6)
+    static let trafficBorder = UIColor(white: 0, alpha: 0.25)
+    /// Cursor colours.
+    static let cursorFill = UIColor.black
+    static let cursorOutline = UIColor.white
+    /// Caret in text fields and editors.
+    static let caret = accentText
+    /// Fill of the snap preview panel shown while dragging a window to a screen edge.
+    static let snapPreviewFill = UIColor(white: 1, alpha: 0.08)
+    /// Secondary text drawn on an accent-filled selection row.
+    static let textOnSelectionSecondary = UIColor(white: 1, alpha: 0.78)
+
+    /// Delays and durations that are not animations.
+    enum Timing {
+        static let tooltipDelay: TimeInterval = 0.55
+        static let toastDuration: TimeInterval = 2.4
+        static let caretBlink: TimeInterval = 0.55
+    }
+
+    /// System font with tabular (fixed-width) digits, for clocks and counters that must not jitter.
+    static func tabularFont(_ size: CGFloat, weight: UIFont.Weight = .regular) -> UIFont {
+        .monospacedDigitSystemFont(ofSize: size, weight: weight)
+    }
+
+    /// A soft radial highlight laid over the wallpaper gradient for depth.
+    struct WallpaperHighlight {
+        let color: UIColor
+        /// Centre in unit coordinates of the desktop.
+        let center: CGPoint
+        /// Radius in unit coordinates (relative to the desktop's width).
+        let radius: CGFloat
+    }
+
+    static func wallpaperHighlights(_ wallpaper: Wallpaper) -> [WallpaperHighlight] {
+        switch wallpaper {
+        case .sonoma:
+            return [WallpaperHighlight(color: UIColor(red: 0.95, green: 0.70, blue: 0.55, alpha: 0.55), center: CGPoint(x: 0.82, y: 0.78), radius: 0.55),
+                    WallpaperHighlight(color: UIColor(red: 0.35, green: 0.62, blue: 0.95, alpha: 0.45), center: CGPoint(x: 0.18, y: 0.22), radius: 0.5)]
+        case .midnight:
+            return [WallpaperHighlight(color: UIColor(red: 0.30, green: 0.22, blue: 0.55, alpha: 0.5), center: CGPoint(x: 0.75, y: 0.85), radius: 0.6),
+                    WallpaperHighlight(color: UIColor(red: 0.10, green: 0.25, blue: 0.50, alpha: 0.4), center: CGPoint(x: 0.2, y: 0.15), radius: 0.45)]
+        case .sunrise:
+            return [WallpaperHighlight(color: UIColor(red: 1.0, green: 0.85, blue: 0.55, alpha: 0.6), center: CGPoint(x: 0.7, y: 0.95), radius: 0.6),
+                    WallpaperHighlight(color: UIColor(red: 0.55, green: 0.20, blue: 0.55, alpha: 0.45), center: CGPoint(x: 0.15, y: 0.1), radius: 0.5)]
+        case .graphite:
+            return [WallpaperHighlight(color: UIColor(white: 0.45, alpha: 0.35), center: CGPoint(x: 0.85, y: 0.85), radius: 0.6),
+                    WallpaperHighlight(color: UIColor(white: 0.3, alpha: 0.3), center: CGPoint(x: 0.15, y: 0.2), radius: 0.45)]
+        }
+    }
+}
+
+extension Theme.Size {
+    // Menu bar
+    static let menuBarItemPadding: CGFloat = 10
+    static let menuBarStatusSpacing: CGFloat = 14
+    static let menuBarMark: CGFloat = 14
+    // Menus
+    static let menuInset: CGFloat = 5
+    static let menuIconColumn: CGFloat = 20
+    // Dock
+    static let dockIcon: CGFloat = 52
+    static let dockGap: CGFloat = 10
+    static let dockPadding: CGFloat = 8
+    static let dockBottomMargin: CGFloat = 10
+    static let dockThumbnail: CGFloat = 44
+    static let dockIndicator: CGFloat = 4
+    /// Height of the Dock pill (icon plus padding on both sides).
+    static let dockPill: CGFloat = dockIcon + dockPadding * 2
+    // Windows
+    static let trafficLight: CGFloat = 12
+    static let trafficLightSpacing: CGFloat = 20
+    /// Total width of a resize zone; `resizeOutset` of it lies outside the window frame.
+    static let resizeZone: CGFloat = 7
+    static let resizeOutset: CGFloat = 5
+    // Launcher
+    static let launcherWidth: CGFloat = 640
+    static let launcherField: CGFloat = 64
+    static let launcherIcon: CGFloat = 32
+    // Toggle
+    static let toggleWidth: CGFloat = 38
+    static let toggleHeight: CGFloat = 22
+    static let toggleKnob: CGFloat = 18
+    // Cursor
+    static let cursorCanvas: CGFloat = 32
+}
+
+extension Theme.Radius {
+    static let menuBarItem: CGFloat = 5
+    static let tooltip: CGFloat = 6
+    static let toast: CGFloat = 12
+    static let dock: CGFloat = 20
+    static let pill: CGFloat = 12
+    static let trafficLight: CGFloat = 6
+}
+
+extension Theme.Text {
+    static let launcherField: CGFloat = 22
+    static let launcherIconSymbol: CGFloat = 18
+}
+
+extension Theme.Motion {
+    /// Dock hover magnification.
+    static let dockMagnification: CGFloat = 1.3
+    static let dockNeighbourMagnification: CGFloat = 1.12
+    static let dockLift: CGFloat = 8
+    /// Scale windows and panels appear from / disappear to.
+    static let appearScale: CGFloat = 0.96
+    static let disappearScale: CGFloat = 0.97
+}
+
+extension UIView {
+    /// Applies a house shadow and a matching rounded-rect `shadowPath` for the current bounds.
+    /// Call from `layoutSubviews` so the path follows the frame.
+    func applyShadow(_ shadow: Theme.Shadow, cornerRadius: CGFloat) {
+        applyShadow(shadow)
+        layer.shadowPath = UIBezierPath(roundedRect: bounds, cornerRadius: cornerRadius).cgPath
+    }
+}

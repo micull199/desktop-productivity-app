@@ -29,10 +29,12 @@ enum MenuAction {
     case reload, zoomIn, zoomOut, zoomReset, back, forward, openLocation
     case minimize, zoom, tileLeft, tileRight, tileFull, cycleWindows, closeAllWindows
     case settings, about, launcher, newNote, newTask
+    /// Help › Keyboard Shortcuts: the shortcuts sheet.
+    case keyboardShortcuts
 }
 
 /// The chrome around a `WindowContent`: title bar, traffic lights, drag + resize handling,
-/// focus state and open/close animations.
+/// focus state and open / close / minimise animations.
 final class DesktopWindowView: UIView, PointerTarget {
 
     private enum Zone { case titleBar, content, top, bottom, left, right, topLeft, topRight, bottomLeft, bottomRight }
@@ -48,6 +50,9 @@ final class DesktopWindowView: UIView, PointerTarget {
 
     /// Called while dragging near a screen edge so the desktop can show a snap preview.
     var onSnapPreview: ((WindowManager.Tile?) -> Void)?
+    /// Where the window shrinks to when minimised (superview coordinates), e.g. its Dock icon.
+    /// Falls back to the bottom centre of the work area when nil or when it returns nil.
+    var minimizeTarget: (() -> CGRect?)?
 
     private let clipView = UIView()
     private let titleBar = PassThroughView()
@@ -63,7 +68,10 @@ final class DesktopWindowView: UIView, PointerTarget {
     private var pendingSnap: WindowManager.Tile?
     private var trafficHovered = false
 
-    private let resizeInset: CGFloat = 6
+    /// How far a resize zone reaches inside the frame; the rest lies outside (see `Theme.Size`).
+    private let resizeInset: CGFloat = Theme.Size.resizeZone - Theme.Size.resizeOutset
+    private var lights: [DeskButton] { [closeButton, minimizeButton, zoomButton] }
+    private var lightColors: [UIColor] { [Theme.trafficClose, Theme.trafficMinimize, Theme.trafficZoom] }
 
     init(content: WindowContent, manager: WindowManager) {
         self.content = content
@@ -71,13 +79,11 @@ final class DesktopWindowView: UIView, PointerTarget {
         super.init(frame: .zero)
 
         backgroundColor = Theme.windowBackground
-        layer.cornerRadius = Theme.windowCornerRadius
+        layer.cornerRadius = Theme.Radius.window
         layer.cornerCurve = .continuous
         layer.masksToBounds = false
-        layer.shadowColor = UIColor.black.cgColor
-        layer.shadowOffset = CGSize(width: 0, height: 14)
 
-        clipView.layer.cornerRadius = Theme.windowCornerRadius
+        clipView.layer.cornerRadius = Theme.Radius.window
         clipView.layer.cornerCurve = .continuous
         clipView.clipsToBounds = true
         addSubview(clipView)
@@ -86,43 +92,48 @@ final class DesktopWindowView: UIView, PointerTarget {
         contentContainer.addSubview(content)
 
         titleBar.backgroundColor = Theme.titleBarBackground
-        hairline.backgroundColor = UIColor(white: 0, alpha: 0.35)
+        hairline.backgroundColor = Theme.hairlineDark
         titleBar.addSubview(hairline)
 
-        titleLabel.font = Theme.font(13, weight: .semibold)
+        titleLabel.font = Theme.font(Theme.Text.body, weight: .semibold)
         titleLabel.textColor = Theme.text
         titleLabel.textAlignment = .center
         titleLabel.lineBreakMode = .byTruncatingTail
         titleLabel.text = content.windowTitle
         titleBar.addSubview(titleLabel)
 
-        let lights: [(DeskButton, UIColor, String)] = [
-            (closeButton, Theme.trafficClose, "xmark"),
-            (minimizeButton, Theme.trafficMinimize, "minus"),
-            (zoomButton, Theme.trafficZoom, "arrow.up.left.and.arrow.down.right")
-        ]
-        for (i, (button, color, symbol)) in lights.enumerated() {
-            button.backgroundColor = color
-            button.layer.cornerRadius = 6
+        let glyphs = ["xmark", "minus", "arrow.up.left.and.arrow.down.right"]
+        for (i, button) in lights.enumerated() {
+            button.backgroundColor = lightColors[i]
+            button.layer.cornerRadius = Theme.Radius.trafficLight
             button.layer.borderWidth = 0.5
-            button.layer.borderColor = UIColor(white: 0, alpha: 0.25).cgColor
+            button.layer.borderColor = Theme.trafficBorder.cgColor
             button.showsHoverHighlight = false
+            button.onHoverChange = { [weak self, weak button] on in
+                guard let self, let button else { return }
+                Theme.Motion.animate(Theme.Motion.fast) {
+                    button.backgroundColor = self.lightColor(at: i, pressed: on)
+                }
+            }
             titleBar.addSubview(button)
             let iv = trafficLightSymbols[i]
-            iv.image = UIImage(systemName: symbol, withConfiguration: UIImage.SymbolConfiguration(pointSize: 7, weight: .black))?
-                .withTintColor(UIColor(white: 0, alpha: 0.6), renderingMode: .alwaysOriginal)
+            iv.image = UIImage(systemName: glyphs[i], withConfiguration: UIImage.SymbolConfiguration(pointSize: 7, weight: .black))?
+                .withTintColor(Theme.trafficGlyph, renderingMode: .alwaysOriginal)
             iv.contentMode = .center
-            iv.isHidden = true
+            iv.alpha = 0
             iv.isUserInteractionEnabled = false
             button.addSubview(iv)
         }
+        closeButton.tooltipText = "Close"
+        minimizeButton.tooltipText = "Minimize"
+        zoomButton.tooltipText = "Zoom"
         closeButton.onTap = { [weak self] in guard let self else { return }; self.manager.close(self) }
         minimizeButton.onTap = { [weak self] in guard let self else { return }; self.manager.minimize(self) }
         zoomButton.onTap = { [weak self] in guard let self else { return }; self.manager.zoom(self) }
 
         layer.addSublayer(borderLayer)
         borderLayer.borderWidth = 0.5
-        borderLayer.cornerRadius = Theme.windowCornerRadius
+        borderLayer.cornerRadius = Theme.Radius.window
         borderLayer.cornerCurve = .continuous
 
         content.onTitleChange = { [weak self] title in self?.titleLabel.text = title }
@@ -140,21 +151,23 @@ final class DesktopWindowView: UIView, PointerTarget {
         super.layoutSubviews()
         clipView.frame = bounds
         titleBar.frame = CGRect(x: 0, y: 0, width: bounds.width, height: Theme.titleBarHeight)
-        hairline.frame = CGRect(x: 0, y: Theme.titleBarHeight - 1, width: bounds.width, height: 1)
+        hairline.frame = CGRect(x: 0, y: Theme.titleBarHeight - Theme.Size.hairline, width: bounds.width, height: Theme.Size.hairline)
         contentContainer.frame = content.drawsOwnTitleBar
             ? bounds
             : CGRect(x: 0, y: Theme.titleBarHeight, width: bounds.width, height: bounds.height - Theme.titleBarHeight)
         content.frame = contentContainer.bounds
-        let lightY = (Theme.titleBarHeight - 12) / 2
-        closeButton.frame = CGRect(x: 12, y: lightY, width: 12, height: 12)
-        minimizeButton.frame = CGRect(x: 32, y: lightY, width: 12, height: 12)
-        zoomButton.frame = CGRect(x: 52, y: lightY, width: 12, height: 12)
-        for iv in trafficLightSymbols { iv.frame = CGRect(x: 0, y: 0, width: 12, height: 12) }
-        titleLabel.frame = CGRect(x: 80, y: 0, width: bounds.width - 160, height: Theme.titleBarHeight)
+        let d = Theme.Size.trafficLight
+        let lightY = (Theme.titleBarHeight - d) / 2
+        for (i, button) in lights.enumerated() {
+            button.frame = CGRect(x: Theme.Space.m + CGFloat(i) * Theme.Size.trafficLightSpacing, y: lightY, width: d, height: d)
+        }
+        for iv in trafficLightSymbols { iv.frame = CGRect(x: 0, y: 0, width: d, height: d) }
+        let titleInset = Theme.Space.m + CGFloat(lights.count) * Theme.Size.trafficLightSpacing + Theme.Space.s
+        titleLabel.frame = CGRect(x: titleInset, y: 0, width: max(0, bounds.width - titleInset * 2), height: Theme.titleBarHeight)
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         borderLayer.frame = bounds
-        layer.shadowPath = UIBezierPath(roundedRect: bounds, cornerRadius: Theme.windowCornerRadius).cgPath
+        layer.shadowPath = UIBezierPath(roundedRect: bounds, cornerRadius: Theme.Radius.window).cgPath
         CATransaction.commit()
     }
 
@@ -163,16 +176,24 @@ final class DesktopWindowView: UIView, PointerTarget {
 
     // MARK: - Focus
 
+    private func lightColor(at index: Int, pressed: Bool) -> UIColor {
+        guard hasFocus || trafficHovered else { return Theme.trafficInactive }
+        let base = lightColors[index]
+        if pressed {
+            var h: CGFloat = 0, s: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+            base.getHue(&h, saturation: &s, brightness: &b, alpha: &a)
+            return UIColor(hue: h, saturation: s, brightness: b * 0.82, alpha: a)
+        }
+        return base
+    }
+
     func setFocused(_ focused: Bool) {
         hasFocus = focused
         if !content.drawsOwnTitleBar { titleBar.backgroundColor = focused ? Theme.titleBarBackground : Theme.titleBarBackgroundInactive }
         titleLabel.textColor = focused ? Theme.text : Theme.secondaryText
-        layer.shadowOpacity = focused ? 0.55 : 0.3
-        layer.shadowRadius = focused ? 28 : 14
-        borderLayer.borderColor = (focused ? Theme.border : UIColor(white: 1, alpha: 0.08)).cgColor
-        closeButton.backgroundColor = focused ? Theme.trafficClose : Theme.trafficInactive
-        minimizeButton.backgroundColor = focused ? Theme.trafficMinimize : Theme.trafficInactive
-        zoomButton.backgroundColor = focused ? Theme.trafficZoom : Theme.trafficInactive
+        applyShadow(focused ? .windowFocused : .windowInactive)
+        borderLayer.borderColor = (focused ? Theme.border : Theme.inactiveBorder).cgColor
+        for (i, button) in lights.enumerated() { button.backgroundColor = lightColor(at: i, pressed: button.isHovered) }
         if focused { content.contentDidFocus() } else { content.contentDidBlur() }
     }
 
@@ -197,8 +218,17 @@ final class DesktopWindowView: UIView, PointerTarget {
     }
 
     func cursorStyle(at local: CGPoint) -> CursorStyle {
-        if case .move? = drag { return .closedHand }
-        switch zone(at: local) {
+        if let drag {
+            switch drag {
+            case .move: return .closedHand
+            case .resize(let z, _, _): return Self.resizeCursor(for: z)
+            }
+        }
+        return Self.resizeCursor(for: zone(at: local))
+    }
+
+    private static func resizeCursor(for zone: Zone) -> CursorStyle {
+        switch zone {
         case .left, .right: return .resizeHorizontal
         case .top, .bottom: return .resizeVertical
         case .topLeft, .bottomRight: return .resizeDiagonalNWSE
@@ -216,12 +246,16 @@ final class DesktopWindowView: UIView, PointerTarget {
     }
 
     private func setTrafficHovered(_ hovered: Bool) {
+        guard trafficHovered != hovered else { return }
         trafficHovered = hovered
-        for iv in trafficLightSymbols { iv.isHidden = !hovered }
+        Theme.Motion.animate(Theme.Motion.fast) {
+            for iv in self.trafficLightSymbols { iv.alpha = hovered ? 1 : 0 }
+            for (i, button) in self.lights.enumerated() { button.backgroundColor = self.lightColor(at: i, pressed: button.isHovered) }
+        }
     }
 
     /// Traffic lights are nested buttons; the desktop asks the window to show their glyphs when
-    /// the cursor is anywhere over the title bar.
+    /// the cursor is anywhere over the title bar (also for content that draws its own title bar).
     func trafficLightsHover(_ hovered: Bool) { setTrafficHovered(hovered) }
 
     func pointer(_ event: PointerEvent, local: CGPoint) {
@@ -312,26 +346,31 @@ final class DesktopWindowView: UIView, PointerTarget {
 
     func animateOpen() {
         alpha = 0
-        transform = CGAffineTransform(scaleX: 0.94, y: 0.94)
-        UIView.animate(withDuration: 0.22, delay: 0, options: [.curveEaseOut]) {
+        transform = CGAffineTransform(scaleX: Theme.Motion.appearScale, y: Theme.Motion.appearScale)
+        Theme.Motion.spring(0.3) {
             self.alpha = 1
             self.transform = .identity
         }
     }
 
     func animateClose(completion: @escaping () -> Void) {
-        UIView.animate(withDuration: 0.16, delay: 0, options: [.curveEaseIn]) {
+        Theme.Motion.animate(Theme.Motion.fast, animations: {
             self.alpha = 0
-            self.transform = CGAffineTransform(scaleX: 0.95, y: 0.95)
-        } completion: { _ in completion() }
+            self.transform = CGAffineTransform(scaleX: Theme.Motion.disappearScale, y: Theme.Motion.disappearScale)
+        }, completion: { _ in completion() })
     }
 
+    /// Shrinks the window toward its Dock icon (or the bottom centre when the Dock has no icon).
     func animateMinimize() {
-        let target = CGPoint(x: manager.workArea.midX, y: manager.workArea.maxY + 60)
-        UIView.animate(withDuration: 0.28, delay: 0, options: [.curveEaseIn]) {
+        let fallback = CGRect(x: manager.workArea.midX - Theme.Size.dockIcon / 2, y: manager.workArea.maxY + Theme.Size.dockBottomMargin,
+                              width: Theme.Size.dockIcon, height: Theme.Size.dockIcon)
+        let target = minimizeTarget?() ?? fallback
+        let scale = max(0.04, min(target.width / max(bounds.width, 1), target.height / max(bounds.height, 1)))
+        let center = self.center
+        UIView.animate(withDuration: Theme.Motion.slow, delay: 0, options: [.curveEaseIn, .beginFromCurrentState]) {
             self.alpha = 0
-            self.transform = CGAffineTransform(translationX: target.x - self.center.x, y: target.y - self.center.y)
-                .scaledBy(x: 0.1, y: 0.1)
+            self.transform = CGAffineTransform(translationX: target.midX - center.x, y: target.midY - center.y)
+                .scaledBy(x: scale, y: scale)
         } completion: { _ in
             self.isHidden = self.isMinimized
         }
@@ -339,14 +378,14 @@ final class DesktopWindowView: UIView, PointerTarget {
 
     func animateRestore() {
         isHidden = false
-        UIView.animate(withDuration: 0.28, delay: 0, usingSpringWithDamping: 0.85, initialSpringVelocity: 0.5) {
+        Theme.Motion.spring(Theme.Motion.slow) {
             self.alpha = 1
             self.transform = .identity
         }
     }
 
     func animate(to target: CGRect) {
-        UIView.animate(withDuration: 0.25, delay: 0, usingSpringWithDamping: 0.9, initialSpringVelocity: 0.4) {
+        Theme.Motion.spring(0.3, damping: 0.9) {
             self.frame = target
             self.layoutIfNeeded()
         }
