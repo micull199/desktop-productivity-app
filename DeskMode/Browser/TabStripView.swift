@@ -211,6 +211,9 @@ final class TabStripView: UIView {
 
     func update(items: [Item], activeIndex: Int) {
         let countChanged = items.count != buttons.count
+        // Before the first layout the "+" button has no position yet; animating new tabs out of
+        // it would make them fly in from the traffic lights. Place them directly instead.
+        let animateGrowth = bounds.width > 0 && newTabButton.frame.minX > 0
         while buttons.count > items.count {
             let b = buttons.removeLast()
             Theme.Motion.animate(Theme.Motion.fast, animations: { b.alpha = 0 }) { _ in b.removeFromSuperview() }
@@ -227,8 +230,10 @@ final class TabStripView: UIView {
             }
             b.onHoverChange = { [weak self] in self?.updateSeparators() }
             // New tabs grow out of the "+" button.
-            b.frame = CGRect(x: newTabButton.frame.minX, y: Self.tabTop, width: 0, height: bounds.height - Self.tabTop)
-            b.alpha = 0
+            if animateGrowth {
+                b.frame = CGRect(x: newTabButton.frame.minX, y: Self.tabTop, width: 0, height: bounds.height - Self.tabTop)
+                b.alpha = 0
+            }
             buttons.append(b)
             insertSubview(b, belowSubview: newTabButton)
         }
@@ -243,7 +248,7 @@ final class TabStripView: UIView {
         // The active card sits above its neighbours so its feet overlap them.
         if buttons.indices.contains(activeIndex) { bringSubviewToFront(buttons[activeIndex]) }
         bringSubviewToFront(newTabButton)
-        if countChanged {
+        if countChanged, animateGrowth {
             setNeedsLayout()
             Theme.Motion.animate(Theme.Motion.normal) { self.layoutIfNeeded() }
         } else {

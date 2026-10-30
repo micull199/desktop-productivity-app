@@ -168,7 +168,9 @@ final class PhoneRootViewController: UIViewController {
             desktop.didMove(toParent: self)
             previewDesktop = desktop
             let exit = DeskButton(title: "Exit Preview", symbol: "xmark", style: .pill)
-            exit.frame = CGRect(x: 12, y: 36, width: 130, height: 26)
+            // Top-right, clear of the window traffic lights that sit at the top-left of the desktop.
+            exit.frame = CGRect(x: desktop.view.bounds.width - 142, y: 36, width: 130, height: 26)
+            exit.autoresizingMask = [.flexibleLeftMargin, .flexibleBottomMargin]
             exit.isUserInteractionEnabled = true
             let tap = UITapGestureRecognizer(target: self, action: #selector(exitPreview))
             exit.addGestureRecognizer(tap)
